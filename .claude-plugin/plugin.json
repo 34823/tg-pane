@@ -1,0 +1,50 @@
+{
+  "name": "tg-pane",
+  "version": "0.3.0",
+  "description": "Telegram in a Claude Code pane: private chats with replies, categories (all chats and folders), model summaries of unread posts",
+  "author": { "name": "34823" },
+  "homepage": "https://github.com/34823/tg-pane",
+  "repository": "https://github.com/34823/tg-pane",
+  "license": "MIT",
+  "keywords": ["telegram", "pane", "function-hooks"],
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "python": {
+      "type": "string",
+      "title": "Python",
+      "description": "The Python that has Playwright installed (pip install playwright; python -m playwright install chromium).",
+      "default": "python3"
+    },
+    "dataDir": {
+      "type": "string",
+      "title": "Data folder",
+      "description": "Where the Telegram Web browser profile (your session — keep it private), the counters cache and the lock live. Empty: ~/.local/share/tg-pane.",
+      "default": ""
+    },
+    "privateFolder": {
+      "type": "string",
+      "title": "Private chats folder",
+      "description": "A Telegram folder for the «Private» tab. Empty: every chat with a person or a bot.",
+      "default": ""
+    },
+    "language": {
+      "type": "string",
+      "title": "Language",
+      "description": "The pane's language and the language of summaries.",
+      "default": "en",
+      "options": ["en", "ru"]
+    },
+    "autoReadChannels": {
+      "type": "boolean",
+      "title": "Mark channels read on open",
+      "description": "Opening a channel on the «Channels» tab marks it read, as Telegram does. Private chats and groups are never marked read by just looking.",
+      "default": true
+    },
+    "timezone": {
+      "type": "string",
+      "title": "Time zone",
+      "description": "IANA name for message times, e.g. Europe/Berlin. Empty: the system's; on a server set to UTC the pane asks once.",
+      "default": ""
+    }
+  }
+}
