@@ -59,8 +59,11 @@ def start():
         chrome = p.chromium.executable_path
     os.makedirs(PROFILE, exist_ok=True); os.chmod(PROFILE, 0o700)
     env = {**os.environ, **({"TZ": TZ} if TZ else {})}
+    # headless Chromium announces "HeadlessChrome" in its User-Agent, which some sites reject — announce plain Chrome
+    ver = subprocess.run([chrome, "--version"], capture_output=True, text=True).stdout.split()[-1]
+    ua = f"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{ver} Safari/537.36"
     args = [chrome, "--headless=new", f"--remote-debugging-port={PORT}", f"--user-data-dir={PROFILE}",
-            "--window-size=1280,900", URL] + (["--no-sandbox"] if os.geteuid() == 0 else [])
+            "--window-size=1280,900", f"--user-agent={ua}", URL] + (["--no-sandbox"] if os.geteuid() == 0 else [])
     subprocess.Popen(args, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                      start_new_session=True)  # detached: outlives this script and the pane
     for _ in range(30):
