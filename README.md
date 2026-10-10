@@ -65,6 +65,27 @@ The backend is a few Python scripts in `backend/` (Playwright). They also work o
 | `tgmsg.py --peer <peer> "<text>"` | send one message, check it went out |
 | `tgunread.py "<folder>" \| --peer <id> \| --private [--mark-only]` | unread posts as text for a model; channels and groups are marked read, private chats (and `--private`) never |
 
+## What it runs, reads and sends
+
+The plugin is a pane (`hooks/register.tsx`) plus the Python scripts in `backend/` (Playwright).
+
+- **Runs:** the Python from the **Python** option (default `python3`) with one of the scripts in `backend/`
+  (`tgbrowser.py`, `tgcache.py`, `tgchat.py`, `tgmsg.py`, `tgunread.py`) and its arguments; the command is
+  `<python> <plugin folder>/backend/<script> <args>`, no shell. `tgbrowser.py` starts a headless Chromium
+  (Playwright's, with a debugging port on `127.0.0.1:9444` only) with its own profile in the data folder.
+  Nothing else is started.
+- **Reads:** Telegram Web (`web.telegram.org/k`) in that browser, logged in to *your* account: folders, unread counters,
+  chat history, and the browser profile — which **is** your Telegram session. The pane also reads `HOME` (only to find the
+  default data folder) and keeps its cache, lock and `config.json` in the data folder. It does not read your project files.
+- **Sends to the network:** only what Telegram Web itself sends to Telegram (reading, and «mark read» when you press it or open a channel with that
+  option on), plus a message when you type one in the pane's input field. There is no other server and no analytics.
+- **Sends to the conversation (and so to the model):** when you press **Summary**, the pane submits a prompt (`$.prompt.submit`)
+  that tells Claude to run `tgunread.py` and retell the result (for a channel or a group that script also marks it read; private chats are never marked read by a summary). The unread posts of that folder or chat then become part of the
+  Claude Code conversation and go to the model like any other text there. Press nothing, and nothing is passed on.
+- **Hooks:** `session.start` registers the `/tg-pane` command and starts timers that run only while the pane is open;
+  `command.run` for `tg-pane` opens the pane; `session.end` / `classic.SessionStart` / `ui.close` reopen or close it after `/clear`;
+  `ui.render` draws it. No hook changes a prompt, a tool call, a setting or another plugin's behaviour.
+
 ## Install
 
 1. In Claude Code (a terminal session):
