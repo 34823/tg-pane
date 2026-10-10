@@ -1,5 +1,14 @@
 {
   "name": "tg-pane",
-  "owner": { "name": "34823" },
-  "plugins": [{ "name": "tg-pane", "source": "./", "description": "Telegram in a Claude Code pane: private chats, channels by folder, summaries" }]
+  "owner": {
+    "name": "34823"
+  },
+  "plugins": [
+    {
+      "name": "tg-pane",
+      "source": "./",
+      "description": "Telegram in a Claude Code pane: private chats, channels by folder, summaries"
+    }
+  ],
+  "description": "Telegram in a Claude Code pane"
 }
