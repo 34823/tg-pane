@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640" font-family="DejaVu Sans Mono, Menlo, Consolas, monospace">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0f1419"/><stop offset="1" stop-color="#1b2433"/>
+    </linearGradient>
+    <linearGradient id="tg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#37aee2"/><stop offset="1" stop-color="#1e96c8"/>
+    </linearGradient>
+  </defs>
+  <rect width="1280" height="640" fill="url(#bg)"/>
+  <text x="80" y="170" font-size="84" font-weight="700" fill="#ffffff">tg-pane</text>
+  <text x="80" y="228" font-size="30" fill="#37aee2">Telegram in a Claude Code pane</text>
+  <text x="80" y="300" font-size="22" fill="#9fb1c5">Read chats and channels beside the conversation.</text>
+  <text x="80" y="336" font-size="22" fill="#9fb1c5">Let Claude retell your unread posts by topic.</text>
+  <text x="80" y="372" font-size="22" fill="#9fb1c5">No API key. No bot. Your own account.</text>
+  <g font-size="20" fill="#0f1419">
+    <rect x="80" y="440" width="170" height="44" rx="22" fill="#37aee2"/><text x="108" y="469">Claude Code</text>
+    <rect x="266" y="440" width="150" height="44" rx="22" fill="#37aee2"/><text x="294" y="469">Telegram</text>
+    <rect x="432" y="440" width="120" height="44" rx="22" fill="#37aee2"/><text x="460" y="469">MIT</text>
+  </g>
+  <text x="80" y="580" font-size="20" fill="#5d7088">github.com/34823/tg-pane</text>
+  <!-- terminal mock -->
+  <g>
+    <rect x="700" y="90" width="500" height="460" rx="14" fill="#0b0f14" stroke="#2b3a4f" stroke-width="2"/>
+    <circle cx="728" cy="116" r="7" fill="#ff5f56"/><circle cx="752" cy="116" r="7" fill="#ffbd2e"/><circle cx="776" cy="116" r="7" fill="#27c93f"/>
+    <line x1="700" y1="140" x2="1200" y2="140" stroke="#2b3a4f" stroke-width="2"/>
+    <g font-size="18">
+      <text x="724" y="176" fill="#37aee2">[Private 3] [Categories 41]</text>
+      <text x="724" y="214" fill="#ffffff">Markets News</text><text x="1100" y="214" fill="#9fb1c5">09:00</text>
+      <rect x="1000" y="196" width="28" height="24" rx="12" fill="#37aee2"/><text x="1008" y="214" fill="#0b0f14" font-size="16">7</text>
+      <text x="724" y="252" fill="#ffffff">Club chat</text><text x="1100" y="252" fill="#9fb1c5">08:12</text>
+      <text x="724" y="290" fill="#ffffff">Dev digest</text><text x="1100" y="290" fill="#9fb1c5">Wed</text>
+      <line x1="724" y1="320" x2="1176" y2="320" stroke="#2b3a4f"/>
+      <text x="724" y="356" fill="#9fb1c5">▲ older</text>
+      <text x="724" y="394" fill="#e6edf3">Pete: who's coming to training?</text>
+      <rect x="724" y="440" width="140" height="40" rx="8" fill="url(#tg)"/><text x="748" y="466" fill="#0b0f14">Summary</text>
+      <rect x="880" y="440" width="170" height="40" rx="8" fill="none" stroke="#37aee2"/><text x="900" y="466" fill="#37aee2">Mark read</text>
+    </g>
+  </g>
+</svg>

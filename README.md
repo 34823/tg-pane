@@ -1,6 +1,30 @@
+<p align="center">
+  <img src="assets/banner.svg" alt="tg-pane — Telegram in a Claude Code pane" width="100%">
+</p>
+
+<p align="center">
+  <a href="https://github.com/34823/tg-pane/stargazers"><img src="https://img.shields.io/github/stars/34823/tg-pane?style=flat&color=37aee2" alt="Stars"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/34823/tg-pane?color=37aee2" alt="MIT"></a>
+  <a href="https://github.com/34823/tg-pane/commits/main"><img src="https://img.shields.io/github/last-commit/34823/tg-pane?color=37aee2" alt="Last commit"></a>
+  <img src="https://img.shields.io/badge/Claude%20Code-plugin-d97757" alt="Claude Code plugin">
+  <img src="https://img.shields.io/badge/Telegram-no%20API%20key-26a5e4?logo=telegram&logoColor=white" alt="No API key">
+  <img src="https://img.shields.io/badge/Linux%20%7C%20macOS-supported-555" alt="Linux and macOS">
+</p>
+
 # tg-pane — Telegram in a Claude Code pane
 
-A Claude Code mod (a function-hooks plugin) that docks your Telegram beside the conversation:
+> Read your Telegram chats and channels beside the conversation, and ask Claude to retell the unread posts by topic.
+> No API key, no bot — it works through your own logged-in Telegram Web.
+
+**Quick start** (details in [Install](#install)):
+
+```
+/plugin install tg-pane --marketplace 34823/tg-pane
+```
+
+Then `/tg-pane`, scan the QR code with your phone — done.
+
+## Features
 
 - **Private** — chats with people, unread first; read a chat without sending «read», reply from the input field.
   The other person sees «read» only when you reply or press **Mark read**. **Summary** retells the unread private
@@ -92,6 +116,10 @@ claude --plugin-dir .
 
 ## Feedback
 
-If it is useful, a ⭐ on the repo helps others find it. Ideas and questions — [Discussions](https://github.com/34823/tg-pane/discussions); bugs — [Issues](https://github.com/34823/tg-pane/issues) (a 👍 on an issue shows what matters most).
+If it is useful, a ⭐ on the repo helps others find it ([contributing](CONTRIBUTING.md), [security](SECURITY.md)). Ideas and questions — [Discussions](https://github.com/34823/tg-pane/discussions); bugs — [Issues](https://github.com/34823/tg-pane/issues) (a 👍 on an issue shows what matters most).
 
 MIT license.
+
+## Star history
+
+[![Star History](https://api.star-history.com/svg?repos=34823/tg-pane&type=Date)](https://star-history.com/#34823/tg-pane&Date)
