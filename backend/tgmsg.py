@@ -41,6 +41,7 @@ with page() as pg:
         close_chat(pg)
         sys.exit("you cannot write to this chat (a channel?) — not sent")
     box.click()
+    box.focus()  # the newer tiptap editor of Telegram Web does not take focus from a click alone
     pg.keyboard.insert_text(text)  # whole, like a paste: fast, and a newline will not send a piece early
     pg.wait_for_timeout(600)
     pg.keyboard.press("Enter")
