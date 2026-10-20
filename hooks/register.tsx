@@ -446,7 +446,15 @@ async function markRead($: EngineInterface) {
 
 async function typing($: EngineInterface, v: string) {
   const rows = Math.max(1, Math.ceil((v.length + 1) / (view.inputAvail || 40)))
-  if (rows !== (await read($, typedRows))) await update($, typedRows, () => rows)
+  if (rows === (await read($, typedRows))) return
+  await update($, typedRows, () => rows)
+  // the redraw takes the cursor away (it would land in the Claude prompt): put it back into the field
+  const key = `msg-${await read($, draft)}`
+  for (const wait of [0, 60, 200]) {
+    if (wait) await new Promise(r => setTimeout(r, wait))
+    const f = await $.ui.focus({ requestId: PANE, key }).catch(() => ({ deny: 'x' }))
+    if (!('deny' in f)) break
+  }
 }
 
 let sendChain: Promise<unknown> = Promise.resolve() // messages go out one by one, in the order typed
