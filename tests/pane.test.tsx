@@ -256,7 +256,7 @@ test('theme button cycles the colour and is kept; the picture button downloads o
   const store: Record<string, unknown> = {}
   backend(on, runs, argv => argv[1]!.endsWith('tgchat.py') && argv[2] === '111' ? ok(JSON.stringify({ peer: '111', title: 'Anna', kind: 'user', unread: 0,
     messages: [{ mid: 7, date: '20.10', time: '12:00', out: false, text: '[media] ', media: 'photo' }] }))
-    : argv[1]!.endsWith('tgmedia.py') ? ok('/data/media/111_7.png\n') : argv[1]!.endsWith('tgcells.py') ? ok(JSON.stringify({ file: '/data/media/111_7.png', columns: 2, rows: 1, cells: 'gCUAAAAAAAAAAAAAgCUAAAAAAAAAAAAA' })) : undefined, [], store)
+    : argv[1]!.endsWith('tgmedia.py') ? ok('/data/media/111_7.png\n') : undefined, [], store)
   on('ui.toast', async () => ({ value: undefined }) as any)
   await $.command.run({ command: 'tg-pane', args: '', origin: { kind: 'user' } } as any)
   const ui = await $.ui.mount({ plugin: 'tg-pane', surface: 'terminal', ...PANE })
@@ -266,8 +266,6 @@ test('theme button cycles the colour and is kept; the picture button downloads o
   expect(runs.some(r => r[1]!.endsWith('tgmedia.py'))).toBe(false) // nothing downloaded until asked
   await ui.press({ key: 'media-7' })
   expect(script(runs.find(r => r[1]!.endsWith('tgmedia.py'))!)).toEqual(['tgmedia.py', '111', '7'])
-  expect(await ui.find({ key: 'close-pic' })).toBeDefined() // the picture over the chat
-  await ui.press({ key: 'close-pic' })
-  expect(await ui.find({ type: 'Button', key: 'chat-111' })).toBeDefined() // closed — the chat is back
+  expect(await ui.find({ type: 'Button', key: 'chat-111' })).toBeDefined() // the chat stays; the picture goes to a split
   await ui.unmount()
 })

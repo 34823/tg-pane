@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Cache, CachedChat, History, Kind, Login, Message, Tab, Viewer } from '../types'
+import type { Cache, CachedChat, History, Kind, Login, Message, Tab } from '../types'
 
 // Telegram in a pane. The data comes from the backend/ scripts, which drive a logged-in Telegram Web in a headless
 // Chromium through its own internal API. Counters are read from the cache file the scripts write; the browser is
@@ -93,7 +93,6 @@ const channel = atom({ plugin: 'tg-pane', key: 'channel' } as const, null as str
 const folder = atom({ plugin: 'tg-pane', key: 'folder' } as const, null as string | null) // open folder on «Channels»
 const chat = atom({ plugin: 'tg-pane', key: 'chat' } as const, null as History | null)
 const lift = atom({ plugin: 'tg-pane', key: 'lift' } as const, 0) // how many rows (lines) of the newest messages are scrolled out of view
-const viewer = atom({ plugin: 'tg-pane', key: 'viewer' } as const, null as Viewer | null) // a picture open over the chat
 const theme = atom({ plugin: 'tg-pane', key: 'theme' } as const, 0) // index into THEMES
 const listTop = atom({ plugin: 'tg-pane', key: 'listTop' } as const, 0) // first shown row of the chat list
 const login = atom({ plugin: 'tg-pane', key: 'login' } as const, null as Login | null) // not logged in: what to show
@@ -385,8 +384,24 @@ async function setTheme($: EngineInterface, i?: number) {
   await $.store.set('theme', next)
 }
 
-// A picture of a message: downloaded on request, turned into cells and drawn over the chat inside the pane.
-async function openMedia($: EngineInterface, mid: number, cols: number, rows: number) {
+let viewerPane = '' // the herdr split showing a picture, if the person asked for one
+
+// The picture in a herdr split next to Claude (Kitty graphics), any key closes it.
+async function openSplit($: EngineInterface, file: string) {
+  const me = await $.env.get('HERDR_PANE_ID')
+  if (!me || (await $.env.get('HERDR_ENV')) !== '1') return void $.ui.toast(file)
+  if (viewerPane) await $.process.run(['herdr', 'pane', 'close', viewerPane], { timeoutMs: 10_000 })
+  const split = await $.process.run(['herdr', 'pane', 'split', me, '--direction', 'right', '--no-focus'], { timeoutMs: 10_000 })
+  let id = ''
+  try { const j = JSON.parse(split.stdout); id = j.result?.pane?.pane_id ?? j.result?.pane_id ?? '' } catch { /* no id */ }
+  if (!id) return
+  viewerPane = id
+  const q = (x: string) => `'${x.replace(/'/g, `'\\''`)}'`
+  await $.process.run(['herdr', 'pane', 'run', id, `${q(opt.python || 'python3')} ${q(`${backend($)}/tgview.py`)} ${q(file)}; herdr pane close ${id}`], { timeoutMs: 10_000 })
+}
+
+// A picture of a message: downloaded on request, shown in a split next to Claude.
+async function openMedia($: EngineInterface, mid: number) {
   lastActive = await $.clock.now()
   const peer = await currentPeer($)
   if (!peer) return
@@ -394,9 +409,7 @@ async function openMedia($: EngineInterface, mid: number, cols: number, rows: nu
   const r = await run($, 'tgmedia.py', [peer, String(mid)], 120_000)
   if (r.exitCode !== 0) return void (await failed($, r, t.mediaFail))
   const file = r.stdout.trim().split('\n').pop() ?? ''
-  const c = await run($, 'tgcells.py', [file, String(cols), String(rows)], 60_000)
-  if (c.exitCode !== 0) return void (await update($, note, () => `${t.mediaFail}: ${c.stderr.trim().slice(-100)}`))
-  await update($, viewer, () => JSON.parse(c.stdout) as Viewer)
+  await openSplit($, file)
   await update($, note, () => '')
 }
 
@@ -643,8 +656,8 @@ export const register: Register = (on, options) => {
     isOpen = true
     const cols = e.props.bodyColumns
     const bodyRows = e.props.scroll?.bodyRows ?? (e.viewport?.rows ?? 30) - 4
-    const [current, cachedData, status, themeIdx, auth, zoneAsk, pic] = await Promise.all(
-      [read($, tab), read($, cache), read($, note), read($, theme), read($, login), read($, askZone), read($, viewer)])
+    const [current, cachedData, status, themeIdx, auth, zoneAsk] = await Promise.all(
+      [read($, tab), read($, cache), read($, note), read($, theme), read($, login), read($, askZone)])
     const pal = THEMES[themeIdx % THEMES.length]!
     const data = cachedData ?? { folders: {} }
     const priv = privateChats(data)
@@ -675,20 +688,6 @@ export const register: Register = (on, options) => {
       </Box>
     )
     const footer = status ? <Text dimColor wrap="truncate-end">{status}</Text> : null
-
-    if (pic && Raster) { // a picture over the chat: the chat is hidden behind it, ✕ (or q) closes
-      return (
-        <Box flexDirection="column" width={cols} alignItems="center">
-          <Box flexDirection="row" justifyContent="flex-end" width={cols}>
-            <Button key="close-pic" hotkey="q" onPress={() => void update($, viewer, () => null)}>✕</Button>
-          </Box>
-          <Box borderStyle="round" borderColor={pal.frame}>
-            <Raster key="pic" columns={pic.columns} rows={pic.rows} cells={pic.cells} />
-          </Box>
-          {footer}
-        </Box>
-      )
-    }
 
     if (zoneAsk) {
       return (
@@ -847,7 +846,7 @@ export const register: Register = (on, options) => {
         ) : m.media ? (
           <Box key={m.key} flexDirection="row" width={inner}>
             <Text color={m.out ? pal.accent : undefined} dimColor={!m.out}>▎ </Text>
-            <Button key={`media-${m.media.mid}`} plain onPress={() => void openMedia($, m.media!.mid, cols - 4, bodyRows - 6)}>{m.text}</Button>
+            <Button key={`media-${m.media.mid}`} plain onPress={() => void openMedia($, m.media!.mid)}>{m.text}</Button>
           </Box>
         ) : (
           <Box key={m.key} flexDirection="row" width={inner}>

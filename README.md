@@ -64,7 +64,6 @@ The backend is a few Python scripts in `backend/` (Playwright). They also work o
 | `tgchat.py <peer> [N] [--read] [--before <mid>]` | a chat's history as JSON |
 | `tgmsg.py --peer <peer> "<text>"` | send one message, check it went out |
 | `tgmedia.py <peer> <mid>` | downloads one message's picture (photo, image, video preview) to the data folder as PNG, only when you press «open» |
-| `tgcells.py <png> <cols> <rows>` | turns that picture into terminal cells for the pane (needs Pillow) |
 | `tgunread.py "<folder>" \| --peer <id> \| --private [--mark-only]` | unread posts as text for a model; channels and groups are marked read, private chats (and `--private`) never |
 
 ## What it runs, reads and sends
