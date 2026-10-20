@@ -22,7 +22,7 @@ const T = {
   en: {
     private: 'Private', channels: 'Categories', refresh: 'Refresh', cache: 'cache', allChats: 'All chats',
     noCache: 'no counters yet — press «Refresh»', loading: 'loading…', marking: 'marking read…', sending: 'sending…',
-    sent: 'sent', notSent: 'NOT sent', failed: 'failed', counts: 'counters', updating: 'updating counters…',
+    ok: 'all good', sent: 'sent', notSent: 'NOT sent', failed: 'failed', counts: 'counters', updating: 'updating counters…',
     flood: 'Telegram asks to slow down — pausing for 10 min', restarting: 'starting the Telegram browser…',
     paused: 'auto-refresh paused — press «Refresh»', pickChat: 'Pick a chat on the left. The other person sees «read» only after you reply or press «Mark read».',
     pickFirst: 'Pick a chat first', read: (n: number) => `Mark read (${n})`, summary: 'Summary', readAll: 'Mark all read',
@@ -54,7 +54,7 @@ const T = {
   ru: {
     private: 'Личные', channels: 'Категории', refresh: 'Обновить', cache: 'кэш', allChats: 'Все чаты',
     noCache: 'нет кэша счётчиков — нажми «Обновить»', loading: 'загружаю…', marking: 'помечаю прочитанным…', sending: 'отправляю…',
-    sent: 'отправлено', notSent: 'НЕ отправлено', failed: 'ошибка', counts: 'счётчики', updating: 'обновляю счётчики…',
+    ok: 'всё в порядке', sent: 'отправлено', notSent: 'НЕ отправлено', failed: 'ошибка', counts: 'счётчики', updating: 'обновляю счётчики…',
     flood: 'Telegram просит притормозить — пауза 10 мин', restarting: 'запускаю браузер Telegram…',
     paused: 'автообновление на паузе — нажми «Обновить»', pickChat: 'Выбери чат слева. Собеседник увидит «прочитано», только когда ответишь или нажмёшь «Прочитать».',
     pickFirst: 'Сначала выбери чат', read: (n: number) => `Прочитать (${n})`, summary: 'Сводка', readAll: 'Прочитать всё',
@@ -686,6 +686,12 @@ export const register: Register = (on, options) => {
         </Box>
       </Box>
     )
+    // Under the time: what is going on now, or that all is well.
+    const statusRow = (
+      <Box width={cols} justifyContent="flex-end">
+        <Text wrap="truncate-end" color={status ? pal.accent : undefined} dimColor={!status}>{status || `✓ ${t.ok}`}</Text>
+      </Box>
+    )
     const footer = status ? <Text dimColor wrap="truncate-end">{status}</Text> : null
 
     if (pic && (Raster || Image)) { // a picture over the chat: the chat is hidden behind it, ✕ (or q) closes
@@ -806,7 +812,7 @@ export const register: Register = (on, options) => {
     // always has something to scroll and keeps raising the wheel for us).
     // Room for three lines of typed text: the field wraps by itself, and a redraw while typing takes the cursor away.
     const inputRows = writable ? 5 : 0
-    const boxH = Math.max(7, bodyRows - 2 - (folderBar ? 2 : 0) - inputRows - 1 - (footer ? 1 : 0)) // the status line sits above the input, the input is at the bottom
+    const boxH = Math.max(7, bodyRows - 2 - (folderBar ? 2 : 0) - inputRows) // the status is under the time, the input is at the very bottom
     const listFit = boxH - 2
     const sorted = [...listed].sort(unreadFirst)
     const paged = sorted.length > listFit
@@ -882,13 +888,13 @@ export const register: Register = (on, options) => {
     return (
       <Box flexDirection="column">
         {header}
+        {statusRow}
         {folderBar}
-        <Box flexDirection="row" marginTop={1} gap={narrow ? 0 : 1}>
+        <Box flexDirection="row" gap={narrow ? 0 : 1}>
           {(!narrow || !peer) && list}
           {(!narrow || peer) && msgView}
         </Box>
         {peer && !writable && <Text dimColor>{t.readOnly}</Text>}
-        {footer}
         {writable && (
           <Box borderStyle="round" borderColor={pal.accent} paddingX={1} width={cols}>
             {Input ? <Input key={`msg-${n}`} autoFocus rows={3} label={`→ ${(title ?? '').slice(0, 20)}`}
@@ -896,7 +902,6 @@ export const register: Register = (on, options) => {
               onSubmit={(value: string) => void send($, value)} /> : <Text dimColor>{t.terminalOnly}</Text>}
           </Box>
         )}
-        <Text> </Text>
       </Box>
     )
   })
