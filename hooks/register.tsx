@@ -148,6 +148,10 @@ const sum = (chats: CachedChat[]) => chats.reduce((s, c) => s + c.unread, 0)
 
 // Colour schemes the person flips through with the button in the header: the accent (borders, own messages, the
 // selected tab) and a quiet tone for frames. Raw hex, not the terminal theme's keys, so they look the same everywhere.
+// Senders in a group: a colour per name, the same every time.
+const SENDER_COLORS = ['#f59e0b', '#60a5fa', '#34d399', '#f472b6', '#c084fc', '#f87171', '#22d3ee', '#a3e635']
+const senderColor = (name: string) => SENDER_COLORS[[...name].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) >>> 0, 7) % SENDER_COLORS.length]!
+
 const THEMES = [
   { name: 'cyan', accent: '#4fc3d9', frame: '#2f6f7a' },
   { name: 'violet', accent: '#a78bfa', frame: '#5b4b99' },
@@ -180,18 +184,20 @@ export function wrapLines(text: string, width: number) {
   return out
 }
 
-type Row = { key: string; text: string; time?: string; out?: boolean; isDate?: boolean; media?: { mid: number; kind: string } }
+type Row = { key: string; text: string; time?: string; out?: boolean; isDate?: boolean; sender?: string; head?: boolean; media?: { mid: number; kind: string } }
 
 // Every message as rows (one per line, whole text, nothing cut), with a date row where the day changes and a row
-// with the «open» button under a picture. `me` null — no direction (a channel); in a group the sender's name leads.
+// with the «open» button under a picture. `me` null — no direction (a channel); in a group a name row opens each run of one sender's messages.
 export function layoutMessages(messages: Message[], width: number, openLabel: (kind: string) => string = k => k, isGroup = false) {
   const out: Row[] = []
   messages.forEach((m, i) => {
     if (m.date && m.date !== messages[i - 1]?.date) out.push({ key: `d${m.mid}`, text: m.date, isDate: true })
     const body = m.text.replace(/^\[media\] ?/, '')
-    const who = isGroup && !m.out && m.from ? `${m.from}: ` : ''
-    const lines = wrapLines(`${who}${body}`, width)
-    lines.forEach((text, j) => out.push({ key: `m${m.mid}-${j}`, text, time: j === 0 ? m.time : undefined, out: m.out }))
+    const sender = isGroup && !m.out && m.from ? m.from : undefined
+    const prev = messages[i - 1]
+    if (sender && (sender !== prev?.from || prev.out || m.date !== prev.date)) out.push({ key: `h${m.mid}`, text: sender, head: true, sender })
+    const lines = wrapLines(body, width)
+    lines.forEach((text, j) => out.push({ key: `m${m.mid}-${j}`, text, time: j === 0 ? m.time : undefined, out: m.out, sender }))
     if (m.media && m.media !== 'file') out.push({ key: `o${m.mid}`, text: openLabel(m.media), out: m.out, media: { mid: m.mid, kind: m.media } })
   })
   return out
@@ -852,14 +858,19 @@ export const register: Register = (on, options) => {
         {peer && slice.length === 0 && shown && <Text dimColor>{t.nothingYet}</Text>}
         {slice.map(m => m.isDate ? (
           <Box key={m.key} width={inner} justifyContent="center"><Text dimColor>{`── ${m.text} ──`}</Text></Box>
+        ) : m.head ? (
+          <Box key={m.key} flexDirection="row" width={inner}>
+            <Text color={senderColor(m.sender!)}>▎ </Text>
+            <Text bold wrap="truncate-end" color={senderColor(m.sender!)}>{m.text}</Text>
+          </Box>
         ) : m.media ? (
           <Box key={m.key} flexDirection="row" width={inner}>
-            <Text color={m.out ? pal.accent : undefined} dimColor={!m.out}>▎ </Text>
+            <Text color={m.sender ? senderColor(m.sender) : m.out ? pal.accent : undefined} dimColor={!m.out && !m.sender}>▎ </Text>
             <Button key={`media-${m.media.mid}`} plain onPress={() => void openMedia($, m.media!.mid, cols)}>{m.text}</Button>
           </Box>
         ) : (
           <Box key={m.key} flexDirection="row" width={inner}>
-            <Text color={m.out ? pal.accent : undefined} dimColor={!m.out}>▎ </Text>
+            <Text color={m.sender ? senderColor(m.sender) : m.out ? pal.accent : undefined} dimColor={!m.out && !m.sender}>▎ </Text>
             <Box width={textW}><Text wrap="truncate-end" color={m.out ? pal.accent : undefined}>{m.text}</Text></Box>
             <Box width={6} flexShrink={0} justifyContent="flex-end"><Text dimColor>{m.time ?? ''}</Text></Box>
           </Box>

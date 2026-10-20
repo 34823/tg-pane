@@ -219,7 +219,8 @@ test('a group shows who wrote; «Private» has a summary that marks nothing read
   expect(await ui.find({ type: 'Button', key: 'folder-@all' })).toBeDefined()
   await ui.press({ key: 'folder-Interesting' })
   await ui.press({ key: 'chat--6' })
-  expect(await ui.find({ type: 'Text', text: /Петя: кто на тренировку\?/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^Петя$/ })).toBeDefined() // the name on its own row
+  expect(await ui.find({ type: 'Text', text: /^кто на тренировку\?$/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /^12:00$/ })).toBeDefined()
   await ui.unmount()
 })
