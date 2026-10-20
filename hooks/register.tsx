@@ -640,7 +640,6 @@ export const register: Register = (on, options) => {
     const { Box, Text, Button } = el
     const Input = 'Input' in el ? el.Input : undefined // the mobile app has no input field
     const Raster = 'Raster' in el ? el.Raster : undefined // terminal only
-    const Image = 'Image' in el ? el.Image : undefined // terminal only: real pixels
     isOpen = true
     const cols = e.props.bodyColumns
     const bodyRows = e.props.scroll?.bodyRows ?? (e.viewport?.rows ?? 30) - 4
@@ -677,16 +676,14 @@ export const register: Register = (on, options) => {
     )
     const footer = status ? <Text dimColor wrap="truncate-end">{status}</Text> : null
 
-    if (pic && (Raster || Image)) { // a picture over the chat: the chat is hidden behind it, ✕ (or q) closes
+    if (pic && Raster) { // a picture over the chat: the chat is hidden behind it, ✕ (or q) closes
       return (
         <Box flexDirection="column" width={cols} alignItems="center">
           <Box flexDirection="row" justifyContent="flex-end" width={cols}>
             <Button key="close-pic" hotkey="q" onPress={() => void update($, viewer, () => null)}>✕</Button>
           </Box>
           <Box borderStyle="round" borderColor={pal.frame}>
-            {Image
-              ? <Image key="pic" source={{ file: pic.file, format: 'png' }} columns={pic.columns} rows={pic.rows} alt=" " />
-              : Raster && <Raster key="pic" columns={pic.columns} rows={pic.rows} cells={pic.cells} />}
+            <Raster key="pic" columns={pic.columns} rows={pic.rows} cells={pic.cells} />
           </Box>
           {footer}
         </Box>
