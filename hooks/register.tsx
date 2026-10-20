@@ -899,7 +899,7 @@ export const register: Register = (on, options) => {
         {writable && (
           <Box borderStyle="round" borderColor={pal.accent} paddingX={1} width={cols}>
             {Input ? <Input key={`msg-${n}`} autoFocus rows={3} onInput={(v: string) => void typing($, v)} label={`→ ${(title ?? '').slice(0, 20)}`}
-              placeholder={t.placeholder} submitLabel={t.send}
+              placeholder={t.placeholder} submitLabel=""
               onSubmit={(value: string) => void send($, value)} /> : <Text dimColor>{t.terminalOnly}</Text>}
           </Box>
         )}
