@@ -806,7 +806,7 @@ export const register: Register = (on, options) => {
     // always has something to scroll and keeps raising the wheel for us).
     // Room for three lines of typed text: the field wraps by itself, and a redraw while typing takes the cursor away.
     const inputRows = writable ? 5 : 0
-    const boxH = Math.max(7, bodyRows - 2 - (folderBar ? 2 : 0) - inputRows - 2)
+    const boxH = Math.max(7, bodyRows - 2 - (folderBar ? 2 : 0) - inputRows - 1 - (footer ? 1 : 0)) // the status line sits above the input, the input is at the bottom
     const listFit = boxH - 2
     const sorted = [...listed].sort(unreadFirst)
     const paged = sorted.length > listFit
@@ -888,14 +888,14 @@ export const register: Register = (on, options) => {
           {(!narrow || peer) && msgView}
         </Box>
         {peer && !writable && <Text dimColor>{t.readOnly}</Text>}
+        {footer}
         {writable && (
           <Box borderStyle="round" borderColor={pal.accent} paddingX={1} width={cols}>
             {Input ? <Input key={`msg-${n}`} autoFocus rows={3} label={`→ ${(title ?? '').slice(0, 20)}`}
-              placeholder={t.placeholder} submitLabel=""
+              placeholder={t.placeholder} submitLabel=" "
               onSubmit={(value: string) => void send($, value)} /> : <Text dimColor>{t.terminalOnly}</Text>}
           </Box>
         )}
-        {footer ?? <Text> </Text>}
         <Text> </Text>
       </Box>
     )
