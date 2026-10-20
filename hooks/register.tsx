@@ -1268,7 +1268,7 @@ export const register: Register = (on, options) => {
             {narrow && <Button key="back-list" onPress={() => void closeChat($)}>{t.chats}</Button>}
             <Text bold color={pal.accent} wrap="truncate-end">{title ?? '…'}</Text>
             <Button key="search-chat" plain onPress={() => void openSearch($)}>⌕</Button>
-            {kind === 'channel' || kind === 'group' ? summaryButton(`c:${peer}`, menuOpen, () => void digestChat($, peer!, title ?? peer!), p => void digestPeriod($, { peer: peer! }, title ?? peer!, p)) : null}
+            {current === 'channels' && (kind === 'channel' || kind === 'group') ? summaryButton(`c:${peer}`, menuOpen, () => void digestChat($, peer!, title ?? peer!), p => void digestPeriod($, { peer: peer! }, title ?? peer!, p)) : null}
             {jumpMid !== null && <Button key="to-new" plain onPress={() => void toNewest($)}>{t.toNew}</Button>}
           </Box>
           <Box flexDirection="row" gap={1}>

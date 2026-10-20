@@ -451,3 +451,74 @@ test('layout: what a message answers, reactions and a transcript are quiet rows 
   const idle = layoutMessages([{ mid: 2, date: '1.1', time: '10:01', out: false, text: '[media] ', media: 'round' }], 30, k => `label ${k}`)
   expect(idle.find(r => r.trans)).toMatchObject({ trans: { mid: 2, kind: 'round' }, text: 'label round' })
 })
+
+test('every ✕ of the top row lets go: reply, edit, reaction choice, forward, delete question', RU, async ($, on) => {
+  const runs: string[][] = []
+  await open(on, runs)
+  await $.command.run({ command: 'tg-pane', args: '', origin: { kind: 'user' } } as any)
+  const ui = await $.ui.mount({ plugin: 'tg-pane', surface: 'terminal', ...PANE })
+  await ui.press({ key: 'chat-111' })
+  const title = () => ui.find({ type: 'Button', key: 'search-chat' }) // the title row is back
+  await ui.press({ key: 'pick-m6-0' })
+  await ui.press({ key: 'act-reply' })
+  expect(await title()).toBeUndefined()
+  await ui.press({ key: 'mode-x' })
+  expect(await title()).toBeDefined()
+
+  await ui.press({ key: 'pick-m8-0' })
+  await ui.press({ key: 'pick-m6-0' })
+  await ui.press({ key: 'act-edit' })
+  await ui.press({ key: 'mode-x' })
+  expect(await title()).toBeDefined()
+  expect(await ui.find({ type: 'Input', key: 'msg-2' })).toBeDefined() // the field is empty again (a new one)
+
+  await ui.press({ key: 'pick-m8-0' })
+  await ui.press({ key: 'act-react' })
+  await ui.press({ key: 'bar-x' })
+  expect(await ui.find({ type: 'Button', key: 'act-react' })).toBeDefined()
+  await ui.press({ key: 'act-fwd' })
+  await ui.press({ key: 'fwd-x' })
+  expect(await ui.find({ type: 'Button', key: 'act-react' })).toBeDefined()
+  await ui.press({ key: 'act-fwd' })
+  await ui.press({ key: 'fwd-111' })
+  await ui.press({ key: 'fwd-x' }) // from the question back to the list of chats
+  expect(await ui.find({ type: 'Button', key: 'fwd-111' })).toBeDefined()
+  await ui.press({ key: 'fwd-x' })
+  await ui.press({ key: 'pick-m6-0' })
+  await ui.press({ key: 'act-del' })
+  await ui.press({ key: 'del-no' })
+  expect(await ui.find({ type: 'Button', key: 'act-del' })).toBeDefined()
+  expect(runs.some(r => r[1]!.endsWith('tgact.py'))).toBe(false) // nothing was done to Telegram
+  await ui.unmount()
+})
+
+test('the bottom of a window around a found message loads what came after it', RU, async ($, on) => {
+  const runs: string[][] = []
+  const two = JSON.stringify({ peer: '111', title: 'Anna', kind: 'user', messages: [{ mid: 2, date: '1.10', time: '08:59', out: false, text: 'до' }, { mid: 3, date: '1.10', time: '09:00', out: false, text: 'кофе' }] })
+  await open(on, runs, argv => (argv[1]!.endsWith('tgchat.py') && (argv.includes('--around') || argv.includes('--query')) ? ok(two) : undefined))
+  await $.command.run({ command: 'tg-pane', args: '', origin: { kind: 'user' } } as any)
+  const ui = await $.ui.mount({ plugin: 'tg-pane', surface: 'terminal', ...PANE })
+  await ui.press({ key: 'chat-111' })
+  await ui.press({ key: 'search-chat' })
+  await ui.input({ key: 'chat-q', text: 'кофе' })
+  await ui.press({ key: 'qhit-3' })
+  expect(runs.some(a => a.includes('--around'))).toBe(true)
+  await ui.press({ key: 'newer' })
+  expect(runs.some(a => script(a).join('|') === 'tgchat.py|111|40|--after|3')).toBe(true)
+  expect(await ui.find({ type: 'Button', key: 'to-new' })).toBeUndefined() // reached the newest: live again
+  await ui.unmount()
+})
+
+test('a failed transcript says so and the button stays; a narrow pane keeps the actions', RU, async ($, on) => {
+  const runs: string[][] = []
+  await open(on, runs, argv => (argv[1]!.endsWith('tgact.py') ? { value: { exitCode: 1, stdout: '', stderr: 'transcription failed: PREMIUM_ACCOUNT_REQUIRED', isStdoutTruncated: false, isStderrTruncated: false } } : undefined))
+  await $.command.run({ command: 'tg-pane', args: '', origin: { kind: 'user' } } as any)
+  const ui = await $.ui.mount({ plugin: 'tg-pane', surface: 'terminal', ...PANE, props: { ...PANE.props, bodyColumns: 50 } })
+  await ui.press({ key: 'chat-111' })
+  await ui.press({ key: 'tr-7' })
+  expect(await ui.find({ type: 'Text', text: /Premium/ })).toBeDefined()
+  expect(await ui.find({ type: 'Button', key: 'tr-7' })).toBeDefined()
+  await ui.press({ key: 'pick-m6-0' })
+  expect(await ui.find({ type: 'Button', key: 'act-react' })).toBeDefined() // the row of actions with short labels
+  await ui.unmount()
+})
