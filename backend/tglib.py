@@ -178,7 +178,14 @@ FIND_API_JS = """async ({name, limit}) => { const m = appImManager.managers, pee
 
 READ_API_JS = """async ({peer, upTo}) => { const m = appImManager.managers, p = +peer;
   const d = await m.dialogsStorage.getDialogOnly(p), maxId = upTo || d?.top_message;
-  if (maxId) await m.appMessagesManager.readHistory({peerId: p, maxId}); }"""
+  if (!maxId) return;
+  await m.appMessagesManager.readHistory({peerId: p, maxId});
+  // readHistory only queues the request: wait until the dialog shows it read, or closing the page right after loses it
+  for (let i = 0; i < 40; i++) {
+    const x = await m.dialogsStorage.getDialogOnly(p);
+    if (!x || !x.unread_count || x.read_inbox_max_id >= maxId) return;
+    await new Promise(r => setTimeout(r, 100));
+  } }"""
 
 
 def api(pg, js, arg):
