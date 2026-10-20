@@ -26,7 +26,8 @@ const T = {
     flood: 'Telegram asks to slow down — pausing for 10 min', restarting: 'starting the Telegram browser…',
     paused: 'auto-refresh paused — press «Refresh»', pickChat: 'Pick a chat on the left. The other person sees «read» only after you reply or press «Mark read».',
     pickFirst: 'Pick a chat first', read: (n: number) => `Mark read (${n})`, summary: 'Summary', readAll: 'Mark all read',
-    folders: '← Folders', chats: '← Chats', allRead: 'all read', unread: 'unread', older: '▲ older', newer: '▼ newer',
+    folders: '← Folders', chats: '← Chats', allRead: 'all read', unread: 'unread', older: '▲ older', newer: '▼ newer', theme: 'theme', openMedia: (k: string) => `▣ ${k} · open`, mediaKind: { photo: 'photo', image: 'image', video: 'video (preview)', file: 'file' } as Record<string, string>,
+    mediaLoading: 'downloading the picture…', mediaFail: 'could not get the picture', noHerdr: (p: string) => `Not in herdr — the picture is saved: ${p}`, nothingYet: 'No messages yet', pick: 'pick a chat',
     me: 'me', placeholder: 'message, Enter to send', send: 'send', terminalOnly: 'Writing — from the terminal',
     readOnly: 'channel — read only', asked: (f: string) => `Summary of «${f}» requested — the answer comes in the conversation`,
     markedAll: (n: string) => `«${n}»: all marked read`,
@@ -57,7 +58,8 @@ const T = {
     flood: 'Telegram просит притормозить — пауза 10 мин', restarting: 'запускаю браузер Telegram…',
     paused: 'автообновление на паузе — нажми «Обновить»', pickChat: 'Выбери чат слева. Собеседник увидит «прочитано», только когда ответишь или нажмёшь «Прочитать».',
     pickFirst: 'Сначала выбери чат', read: (n: number) => `Прочитать (${n})`, summary: 'Сводка', readAll: 'Прочитать всё',
-    folders: '← Папки', chats: '← Чаты', allRead: 'всё прочитано', unread: 'непрочит.', older: '▲ раньше', newer: '▼ позже',
+    folders: '← Папки', chats: '← Чаты', allRead: 'всё прочитано', unread: 'непрочит.', older: '▲ раньше', newer: '▼ позже', theme: 'тема', openMedia: (k: string) => `▣ ${k} · открыть`, mediaKind: { photo: 'фото', image: 'картинка', video: 'видео (превью)', file: 'файл' } as Record<string, string>,
+    mediaLoading: 'скачиваю картинку…', mediaFail: 'не удалось получить картинку', noHerdr: (p: string) => `Не в herdr — картинка сохранена: ${p}`, nothingYet: 'Сообщений пока нет', pick: 'выбери чат',
     me: 'я', placeholder: 'сообщение, Enter — отправить', send: 'отправить', terminalOnly: 'Писать — из терминала',
     readOnly: 'канал — только чтение', asked: (f: string) => `Сводка по «${f}» запрошена — ответ придёт в разговоре`,
     markedAll: (n: string) => `«${n}»: всё помечено прочитанным`,
@@ -90,7 +92,8 @@ const selected = atom({ plugin: 'tg-pane', key: 'selected' } as const, null as s
 const channel = atom({ plugin: 'tg-pane', key: 'channel' } as const, null as string | null) // chat on «Channels»
 const folder = atom({ plugin: 'tg-pane', key: 'folder' } as const, null as string | null) // open folder on «Channels»
 const chat = atom({ plugin: 'tg-pane', key: 'chat' } as const, null as History | null)
-const back = atom({ plugin: 'tg-pane', key: 'back' } as const, 0) // how many newest messages are scrolled out of view
+const lift = atom({ plugin: 'tg-pane', key: 'lift' } as const, 0) // how many rows (lines) of the newest messages are scrolled out of view
+const theme = atom({ plugin: 'tg-pane', key: 'theme' } as const, 0) // index into THEMES
 const listTop = atom({ plugin: 'tg-pane', key: 'listTop' } as const, 0) // first shown row of the chat list
 const login = atom({ plugin: 'tg-pane', key: 'login' } as const, null as Login | null) // not logged in: what to show
 const note = atom({ plugin: 'tg-pane', key: 'note' } as const, '')
@@ -120,6 +123,8 @@ async function remember($: EngineInterface) {
 
 async function restorePlace($: EngineInterface) {
   placeRestored = true
+  const th = (await $.store.get('theme')) as number | undefined
+  if (typeof th === 'number') await update($, theme, () => th)
   const p = (await $.store.get('place')) as Place | undefined
   if (!p) return
   await update($, tab, () => p.tab)
@@ -141,28 +146,54 @@ const isPrivateKind = (c: CachedChat) => (c.kind ? ['user', 'bot', 'self'].inclu
 const unreadFirst = (a: CachedChat, b: CachedChat) => (b.unread > 0 ? 1 : 0) - (a.unread > 0 ? 1 : 0)
 const sum = (chats: CachedChat[]) => chats.reduce((s, c) => s + c.unread, 0)
 
-// Fresh messages that fit into `rows` lines of a `width`-wide column (with date separators), the time to go on the
-// right; `me` marks the direction, null — none (a channel); in a group the sender's name.
-export function fitMessages(messages: Message[], rows: number, width: number, me: string | null = 'я') {
-  const out: { key: string; text: string; time?: string; out?: boolean; isDate?: boolean }[] = []
-  let used = 0
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const m = messages[i]!
-    const who = me === null ? '' : m.out ? `${me}: ` : m.from ? `${m.from}: ` : '← '
-    const text = `${who}${m.text.replace(/\s+/g, ' ').slice(0, width * 3)}`
-    const lines = Math.ceil((text.length + 2) / Math.max(4, width - 6))
-    const prev = messages[i - 1]
-    const dateRow = m.date && m.date !== prev?.date ? 1 : 0
-    if (used + lines + dateRow > rows && out.length) break
-    out.unshift({ key: `m${m.mid}`, text, time: m.time, out: m.out })
-    if (dateRow) out.unshift({ key: `d${m.mid}`, text: `— ${m.date} —`, isDate: true })
-    used += lines + dateRow
+// Colour schemes the person flips through with the button in the header: the accent (borders, own messages, the
+// selected tab) and a quiet tone for frames. Raw hex, not the terminal theme's keys, so they look the same everywhere.
+const THEMES = [
+  { name: 'cyan', accent: '#4fc3d9', frame: '#2f6f7a' },
+  { name: 'violet', accent: '#a78bfa', frame: '#5b4b99' },
+  { name: 'green', accent: '#4ade80', frame: '#2f7a4d' },
+  { name: 'amber', accent: '#fbbf24', frame: '#8a6a14' },
+  { name: 'rose', accent: '#fb7185', frame: '#8f3a49' },
+]
+
+// A message cut into lines of at most `width` cells: paragraphs kept, words not split unless longer than a line.
+export function wrapLines(text: string, width: number) {
+  const w = Math.max(4, width)
+  const out: string[] = []
+  for (const para of text.replace(/\r/g, '').split('\n')) {
+    let line = '', used = 0
+    const push = () => { out.push(line); line = ''; used = 0 }
+    for (const word of para.split(/ +/)) {
+      const n = [...word].reduce((s, ch) => s + cells(ch), 0)
+      if (used && used + 1 + n <= w) { line += ` ${word}`; used += 1 + n; continue }
+      if (used) push()
+      if (n <= w) { line = word; used = n; continue }
+      for (const ch of word) { // a word longer than a line
+        const c = cells(ch)
+        if (used + c > w) push()
+        line += ch; used += c
+      }
+    }
+    push()
   }
-  const first = out[0]
-  if (first && !first.isDate) { // the top message's date, even when the one above it (not shown) had the same
-    const m = messages.find(x => `m${x.mid}` === first.key)
-    if (m?.date) out.unshift({ key: `d${m.mid}`, text: `— ${m.date} —`, isDate: true })
-  }
+  while (out.length > 1 && out[out.length - 1] === '') out.pop()
+  return out
+}
+
+type Row = { key: string; text: string; time?: string; out?: boolean; isDate?: boolean; media?: { mid: number; kind: string } }
+
+// Every message as rows (one per line, whole text, nothing cut), with a date row where the day changes and a row
+// with the «open» button under a picture. `me` null — no direction (a channel); in a group the sender's name leads.
+export function layoutMessages(messages: Message[], width: number, openLabel: (kind: string) => string = k => k, isGroup = false) {
+  const out: Row[] = []
+  messages.forEach((m, i) => {
+    if (m.date && m.date !== messages[i - 1]?.date) out.push({ key: `d${m.mid}`, text: m.date, isDate: true })
+    const body = m.text.replace(/^\[media\] ?/, '')
+    const who = isGroup && !m.out && m.from ? `${m.from}: ` : ''
+    const lines = wrapLines(`${who}${body}`, width)
+    lines.forEach((text, j) => out.push({ key: `m${m.mid}-${j}`, text, time: j === 0 ? m.time : undefined, out: m.out }))
+    if (m.media && m.media !== 'file') out.push({ key: `o${m.mid}`, text: openLabel(m.media), out: m.out, media: { mid: m.mid, kind: m.media } })
+  })
   return out
 }
 
@@ -333,13 +364,48 @@ async function loadOlder($: EngineInterface) {
   if (fetchAgain) await fetchChat($) // a chat was picked while older messages loaded
 }
 
+// What the last drawing showed, for the wheel and the keys: all rows of the open chat, the rows that fit, the left column.
+const view = { total: 0, fit: 0, leftWidth: 0, listLen: 0, listFit: 0 }
+
+// Moves the open chat's window by `step` rows (positive — toward older), at once; older messages load in the
+// background when the top is near, the view stays where it is.
 async function scroll($: EngineInterface, step: number) {
   lastActive = await $.clock.now()
-  const h = await read($, chat)
-  const now = await read($, back)
-  if (step > 0 && h && h.messages.length - now - step < step) await loadOlder($)
-  const total = (await read($, chat))?.messages.length ?? 0
-  await update($, back, () => Math.max(0, Math.min(total - 1, now + step)))
+  const now = await read($, lift)
+  const max = Math.max(0, view.total - view.fit)
+  const to = Math.max(0, Math.min(max, now + step))
+  if (to !== now) await update($, lift, () => to)
+  if (step > 0 && max - to < 6) void loadOlder($)
+}
+
+async function setTheme($: EngineInterface, i?: number) {
+  const next = (i ?? (await read($, theme)) + 1) % THEMES.length
+  await update($, theme, () => next)
+  await $.store.set('theme', next)
+}
+
+let viewerPane = '' // the herdr split showing the last picture
+
+// A picture of a message: downloaded on request, then shown in a herdr split next to Claude (Kitty graphics).
+async function openMedia($: EngineInterface, mid: number) {
+  lastActive = await $.clock.now()
+  const peer = await currentPeer($)
+  if (!peer) return
+  await update($, note, () => t.mediaLoading)
+  const r = await run($, 'tgmedia.py', [peer, String(mid)], 120_000)
+  if (r.exitCode !== 0) return void (await failed($, r, t.mediaFail))
+  const file = r.stdout.trim().split('\n').pop() ?? ''
+  await update($, note, () => '')
+  const me = await $.env.get('HERDR_PANE_ID')
+  if (!me || (await $.env.get('HERDR_ENV')) !== '1') return void $.ui.toast(t.noHerdr(file))
+  if (viewerPane) await $.process.run(['herdr', 'pane', 'close', viewerPane], { timeoutMs: 10_000 })
+  const split = await $.process.run(['herdr', 'pane', 'split', me, '--direction', 'right', '--no-focus'], { timeoutMs: 10_000 })
+  let id = ''
+  try { const j = JSON.parse(split.stdout); id = j.result?.pane?.pane_id ?? j.result?.pane_id ?? '' } catch { /* no id: below */ }
+  if (!id) return void (await update($, note, () => `${t.mediaFail}: ${split.stderr.trim().slice(-100)}`))
+  viewerPane = id
+  const q = (x: string) => `'${x.replace(/'/g, `'\\''`)}'`
+  await $.process.run(['herdr', 'pane', 'run', id, `${q(opt.python || 'python3')} ${q(`${backend($)}/tgview.py`)} ${q(file)}; herdr pane close ${id}`], { timeoutMs: 10_000 })
 }
 
 async function openChat($: EngineInterface, peer: string, andRead = false) {
@@ -348,7 +414,7 @@ async function openChat($: EngineInterface, peer: string, andRead = false) {
   if ((await read($, tab)) === 'private') await update($, selected, () => peer)
   else await update($, channel, () => peer)
   await update($, chat, () => null)
-  await update($, back, () => 0)
+  await update($, lift, () => 0)
   await update($, note, () => t.loading)
   await remember($)
   await fetchChat($)
@@ -377,7 +443,7 @@ async function send($: EngineInterface, text: string) {
   const r = await run($, 'tgmsg.py', ['--peer', peer, text], 300_000)
   if (r.exitCode !== 0) return void (await failed($, r, t.notSent))
   await update($, draft, n => n + 1) // a new, empty input field
-  await update($, back, () => 0)
+  await update($, lift, () => 0)
   await update($, note, () => t.sent)
   await loadCache($) // replied = the chat is read, tgmsg zeroed its counter
   await fetchChat($)
@@ -407,7 +473,7 @@ async function switchTab($: EngineInterface, to: Tab) {
   lastActive = await $.clock.now()
   await update($, tab, () => to)
   await update($, chat, () => null)
-  await update($, back, () => 0)
+  await update($, lift, () => 0)
   await update($, listTop, () => 0)
   await update($, note, () => '')
   await remember($)
@@ -555,6 +621,17 @@ export const register: Register = (on, options) => {
     return next(e)
   }).catch(($, e, next) => next(e))
 
+  // The wheel and the keys move the open chat's own window (rows of text), the header and the input stay put.
+  on('ui.scroll', { component: 'Pane', requestId: PANE }, async ($, e, next) => {
+    if (!(await currentPeer($)) || (await read($, login))) return next(e)
+    if (e.pointer && e.pointer.column < view.leftWidth && view.listLen > view.listFit) { // over the chat list
+      await update($, listTop, top => Math.max(0, Math.min(view.listLen - view.listFit, top + e.by)))
+      return {}
+    }
+    await scroll($, -e.by)
+    return {}
+  }).catch(($, e, next) => next(e))
+
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const el = $.ui.resolve(e)
     const { Box, Text, Button } = el
@@ -562,29 +639,35 @@ export const register: Register = (on, options) => {
     const Raster = 'Raster' in el ? el.Raster : undefined // terminal only
     isOpen = true
     const cols = e.props.bodyColumns
-    const rows = Math.max(6, (e.props.scroll?.bodyRows ?? (e.viewport?.rows ?? 30) - 4) - 6) // header, gaps, input, status
-    const current = await read($, tab)
-    const data = (await read($, cache)) ?? { folders: {} }
-    const status = await read($, note)
+    const bodyRows = e.props.scroll?.bodyRows ?? (e.viewport?.rows ?? 30) - 4
+    const [current, cachedData, status, themeIdx, auth, zoneAsk] = await Promise.all(
+      [read($, tab), read($, cache), read($, note), read($, theme), read($, login), read($, askZone)])
+    const pal = THEMES[themeIdx % THEMES.length]!
+    const data = cachedData ?? { folders: {} }
     const priv = privateChats(data)
     const folders = channelFolders(data)
     const named = folders.filter(f => f !== ALL)
     const chanUnread = (named.length ? named : folders).reduce((s, f) => s + sum(folderChats(data, f)), 0)
 
     const header = (
-      <Box flexDirection="row" gap={1}>
-        <Button key="tab-private" hotkey="1" variant={current === 'private' ? 'primary' : undefined}
-          onPress={() => void switchTab($, 'private')}>{`${t.private} ${priv ? sum(priv) : '?'}`}</Button>
-        <Button key="tab-channels" hotkey="2" variant={current === 'channels' ? 'primary' : undefined}
-          onPress={() => void switchTab($, 'channels')}>{`${t.channels} ${chanUnread}`}</Button>
-        <Button key="refresh" onPress={() => void refresh($)}>{t.refresh}</Button>
-        {current === 'private' && priv && sum(priv) > 0 && <Button key="digest-private" onPress={() => void digestPrivate($)}>{t.summary}</Button>}
-        <Text dimColor>{`${t.cache} ${hhmm(data.updated)}`}</Text>
+      <Box flexDirection="row" justifyContent="space-between" width={cols}>
+        <Box flexDirection="row" gap={1}>
+          <Button key="tab-private" hotkey="1" variant={current === 'private' ? 'primary' : undefined}
+            onPress={() => void switchTab($, 'private')}>{`${t.private} ${priv ? sum(priv) : '?'}`}</Button>
+          <Button key="tab-channels" hotkey="2" variant={current === 'channels' ? 'primary' : undefined}
+            onPress={() => void switchTab($, 'channels')}>{`${t.channels} ${chanUnread}`}</Button>
+          {current === 'private' && priv && sum(priv) > 0 && <Button key="digest-private" onPress={() => void digestPrivate($)}>{t.summary}</Button>}
+        </Box>
+        <Box flexDirection="row" gap={1}>
+          <Button key="refresh" plain onPress={() => void refresh($)}>{`↻ ${hhmm(data.updated)}`}</Button>
+          <Text color={pal.accent}>●</Text>
+          <Button key="theme" plain onPress={() => void setTheme($)}>{pal.name}</Button>
+        </Box>
       </Box>
     )
     const footer = status ? <Text dimColor wrap="truncate-end">{status}</Text> : null
 
-    if (await read($, askZone)) {
+    if (zoneAsk) {
       return (
         <Box flexDirection="column">
           <Text wrap="wrap">{t.tzAsk}</Text>
@@ -596,7 +679,6 @@ export const register: Register = (on, options) => {
       )
     }
 
-    const auth = await read($, login)
     if (auth) {
       const cmd = command($, 'tgbrowser.py')
       const qr = auth.state === 'qr' && auth.qr?.length ? qrCells(auth.qr) : null
@@ -618,17 +700,19 @@ export const register: Register = (on, options) => {
     }
 
     const narrow = cols < NARROW
-    const left = narrow ? cols : Math.min(30, Math.max(16, Math.floor(cols * 0.32)))
-    const right = narrow ? cols : Math.max(10, cols - left - 2)
+    const left = narrow ? cols : Math.min(32, Math.max(18, Math.floor(cols * 0.32)))
+    const right = narrow ? cols : cols - left - 1
     const openFolderName = current === 'channels' ? await read($, folder) : null
 
     // Channels: the folders, each with its unread count, a preview and «Summary».
     if (current === 'channels' && openFolderName === null) {
+      const rows = Math.max(6, bodyRows - 4)
       const withPreview = folders.length * 2 <= rows
+      view.leftWidth = 0
       return (
         <Box flexDirection="column">
           {header}
-          <Box flexDirection="column" marginTop={1}>
+          <Box flexDirection="column" marginTop={1} borderStyle="round" borderColor={pal.frame} paddingX={1} width={cols}>
             {folders.map(f => {
               const chats = folderChats(data, f)
               const n = sum(chats)
@@ -657,8 +741,7 @@ export const register: Register = (on, options) => {
 
     // A chat list beside (or, narrow, instead of) the open chat.
     const listed = current === 'private' ? priv ?? [] : folderChats(data, openFolderName!)
-    const peer = await currentPeer($)
-    const history = await read($, chat)
+    const [peer, history, top, hidden] = await Promise.all([currentPeer($), read($, chat), read($, listTop), read($, lift)])
     const shown = history?.peer === peer ? history : null
     const cached = listed.find(c => c.id === peer)
     const kind: Kind | undefined = shown?.kind ?? cached?.kind
@@ -671,23 +754,30 @@ export const register: Register = (on, options) => {
     const folderBar = current === 'channels' && (
       <Box flexDirection="row" gap={1} marginTop={1}>
         <Button key="folders" onPress={() => void openFolder($, null)}>{t.folders}</Button>
-        <Text bold>{`${folderTitle(openFolderName!)} ${sum(listed)}`}</Text>
+        <Text bold color={pal.accent}>{`${folderTitle(openFolderName!)} ${sum(listed)}`}</Text>
         {sum(listed) > 0 && <Button key={`digest-${openFolderName}`} onPress={() => void digest($, openFolderName!, folderTitle(openFolderName!))}>{t.summary}</Button>}
         {sum(listed) > 0 && <Button key="readall" onPress={() => void readAll($, openFolderName!, folderTitle(openFolderName!))}>{t.readAll}</Button>}
       </Box>
     )
 
-    const top = await read($, listTop)
+    // Height budget: header, gap, [folder bar + gap], boxed input (3), status line, one spare row (so the engine
+    // always has something to scroll and keeps raising the wheel for us).
+    const inputRows = writable ? 3 : 0
+    const boxH = Math.max(7, bodyRows - 2 - (folderBar ? 2 : 0) - inputRows - 2)
+    const listFit = boxH - 2
     const sorted = [...listed].sort(unreadFirst)
-    const paged = sorted.length > rows
-    const size = paged ? rows - 1 : rows
+    const paged = sorted.length > listFit
+    const size = paged ? listFit - 1 : listFit
     const from = Math.min(top, Math.max(0, sorted.length - size))
+    view.leftWidth = narrow ? 0 : left
+    view.listLen = sorted.length
+    view.listFit = size
     const list = (
-      <Box flexDirection="column" width={left}>
+      <Box flexDirection="column" width={left} height={boxH} borderStyle="round" borderColor={pal.frame}>
         {sorted.slice(from, from + size).map(c => (
           <Button key={`chat-${c.id}`} plain dimColor={(c.unread === 0 || c.muted) && c.id !== peer}
             onPress={() => void openChat($, c.id, current === 'channels' && opt.autoReadChannels !== false && c.kind === 'channel')}>
-            {chatRow(c, c.id === peer, left - 1)}
+            {chatRow(c, c.id === peer, left - 3)}
           </Button>
         ))}
         {paged && (
@@ -700,34 +790,49 @@ export const register: Register = (on, options) => {
       </Box>
     )
 
-    const hidden = await read($, back)
-    const all = shown?.messages ?? []
-    const visible = all.slice(0, Math.max(0, all.length - hidden))
-    const msgs = fitMessages(visible, rows - 2, right, isChannel ? null : t.me)
-    const step = Math.max(1, msgs.filter(m => !m.isDate).length - 1)
-    const view = (
-      <Box flexDirection="column" width={right} marginLeft={narrow ? 0 : 2}>
-        {!peer && <Text dimColor wrap="wrap">{current === 'private' ? t.pickChat : ''}</Text>}
+    const inner = right - 4 // border and padding
+    const fit = boxH - 3 // border and the title row
+    const textW = inner - 9 // bar, space, time
+    const rowsAll = layoutMessages(shown?.messages ?? [], textW, k => t.openMedia(t.mediaKind[k] ?? k), kind === 'group')
+    view.total = rowsAll.length
+    view.fit = fit
+    const lifted = Math.min(hidden, Math.max(0, rowsAll.length - fit))
+    const end = rowsAll.length - lifted
+    const slice = rowsAll.slice(Math.max(0, end - fit), end)
+    const step = Math.max(1, fit - 2)
+    const msgView = (
+      <Box flexDirection="column" width={right} height={boxH} borderStyle="round" borderColor={peer ? pal.accent : pal.frame} paddingX={1}>
+        {!peer && <Text dimColor wrap="wrap">{current === 'private' ? t.pickChat : t.pick}</Text>}
         {peer && (
-          <Box flexDirection="row" gap={1}>
-            {narrow && <Button key="back-list" onPress={() => void closeChat($)}>{t.chats}</Button>}
-            <Text bold wrap="truncate-end">{title ?? '…'}</Text>
-            {unread > 0 && <Button key="mark-read" onPress={() => void markRead($)}>{t.read(unread)}</Button>}
-            <Button key="digest-chat" onPress={() => void digestChat($, peer, title ?? peer)}>{t.summary}</Button>
+          <Box flexDirection="row" justifyContent="space-between" width={inner}>
+            <Box flexDirection="row" gap={1}>
+              {narrow && <Button key="back-list" onPress={() => void closeChat($)}>{t.chats}</Button>}
+              <Text bold color={pal.accent} wrap="truncate-end">{title ?? '…'}</Text>
+              {unread > 0 && <Button key="mark-read" onPress={() => void markRead($)}>{t.read(unread)}</Button>}
+              <Button key="digest-chat" onPress={() => void digestChat($, peer, title ?? peer)}>{t.summary}</Button>
+            </Box>
+            <Box flexDirection="row" gap={1}>
+              <Button key="older" plain onPress={() => void scroll($, step)}>▲</Button>
+              <Button key="newer" plain onPress={() => void scroll($, -step)}>▼</Button>
+            </Box>
           </Box>
         )}
-        {peer && all.length > 0 && (
-          <Box flexDirection="row" gap={1}>
-            <Button key="older" plain onPress={() => void scroll($, step)}>{t.older}</Button>
-            {hidden > 0 && <Button key="newer" plain onPress={() => void scroll($, -step)}>{t.newer}</Button>}
+        {peer && slice.length === 0 && shown && <Text dimColor>{t.nothingYet}</Text>}
+        {slice.map(m => m.isDate ? (
+          <Box key={m.key} width={inner} justifyContent="center"><Text dimColor>{`── ${m.text} ──`}</Text></Box>
+        ) : m.media ? (
+          <Box key={m.key} flexDirection="row" width={inner}>
+            <Text color={m.out ? pal.accent : undefined} dimColor={!m.out}>▎ </Text>
+            <Button key={`media-${m.media.mid}`} plain onPress={() => void openMedia($, m.media!.mid)}>{m.text}</Button>
           </Box>
-        )}
-        {msgs.map(m => m.isDate ? <Text key={m.key} dimColor>{m.text}</Text> : (
-          <Box key={m.key} flexDirection="row" width={right}>
-            <Box width={right - 6}><Text wrap="wrap" color={m.out ? 'cyan' : undefined}>{m.text}</Text></Box>
-            <Box width={6} flexShrink={0} justifyContent="flex-end" alignSelf="flex-start"><Text dimColor>{m.time}</Text></Box>
+        ) : (
+          <Box key={m.key} flexDirection="row" width={inner}>
+            <Text color={m.out ? pal.accent : undefined} dimColor={!m.out}>▎ </Text>
+            <Box width={textW}><Text wrap="truncate-end" color={m.out ? pal.accent : undefined}>{m.text}</Text></Box>
+            <Box width={6} flexShrink={0} justifyContent="flex-end"><Text dimColor>{m.time ?? ''}</Text></Box>
           </Box>
         ))}
+        {lifted > 0 && <Box position="absolute" right={1} bottom={0}><Text dimColor>{`▼ ${lifted}`}</Text></Box>}
       </Box>
     )
 
@@ -735,16 +840,20 @@ export const register: Register = (on, options) => {
       <Box flexDirection="column">
         {header}
         {folderBar}
-        <Box flexDirection="row" marginTop={1}>
+        <Box flexDirection="row" marginTop={1} gap={narrow ? 0 : 1}>
           {(!narrow || !peer) && list}
-          {(!narrow || peer) && view}
+          {(!narrow || peer) && msgView}
         </Box>
         {peer && !writable && <Text dimColor>{t.readOnly}</Text>}
-        {(writable || (current === 'private' && !peer)) &&
-          (Input ? <Input key={`msg-${n}`} label={peer ? `→ ${(title ?? '').slice(0, 20)}` : '→'}
-            placeholder={t.placeholder} submitLabel={t.send}
-            onSubmit={(value: string) => void send($, value)} /> : <Text dimColor>{t.terminalOnly}</Text>)}
-        {footer}
+        {writable && (
+          <Box borderStyle="round" borderColor={pal.accent} paddingX={1} width={cols}>
+            {Input ? <Input key={`msg-${n}`} label={`→ ${(title ?? '').slice(0, 20)}`}
+              placeholder={t.placeholder} submitLabel={t.send}
+              onSubmit={(value: string) => void send($, value)} /> : <Text dimColor>{t.terminalOnly}</Text>}
+          </Box>
+        )}
+        {footer ?? <Text> </Text>}
+        <Text> </Text>
       </Box>
     )
   })

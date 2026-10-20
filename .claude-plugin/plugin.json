@@ -1,6 +1,6 @@
 {
   "name": "tg-pane",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Telegram in a Claude Code pane: private chats with replies, categories (all chats and folders), model summaries of unread posts",
   "author": { "name": "34823" },
   "homepage": "https://github.com/34823/tg-pane",

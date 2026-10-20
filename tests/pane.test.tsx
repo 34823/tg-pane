@@ -1,4 +1,5 @@
 import { expect, mock, test } from 'claude-code/testing'
+import { layoutMessages, wrapLines } from '../hooks/register'
 
 const CACHE = {
   updated: 1759750000,
@@ -218,7 +219,7 @@ test('a group shows who wrote; «Private» has a summary that marks nothing read
   expect(await ui.find({ type: 'Button', key: 'folder-@all' })).toBeDefined()
   await ui.press({ key: 'folder-Interesting' })
   await ui.press({ key: 'chat--6' })
-  expect(await ui.find({ type: 'Text', text: /^Петя: кто на тренировку\?/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Петя: кто на тренировку\?/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /^12:00$/ })).toBeDefined()
   await ui.unmount()
 })
@@ -232,5 +233,38 @@ test('no time zone known: the pane asks, the answer is kept', { options: { pytho
     await ui.press({ key: 'tz-Europe/Moscow' })
   }
   expect(await ui.find({ type: 'Button', key: 'tab-private' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('a long message is shown whole, wrapped; a picture gets an «open» row', () => {
+  const long = Array.from({ length: 60 }, (_, i) => `слово${i}`).join(' ')
+  const lines = wrapLines(long, 30)
+  expect(lines.length).toBeGreaterThan(8)
+  expect(lines.join(' ')).toBe(long) // nothing cut
+  expect(Math.max(...lines.map(l => l.length))).toBeLessThanOrEqual(30)
+  const rows = layoutMessages([
+    { mid: 1, date: '19.10', time: '10:00', out: false, text: 'a' },
+    { mid: 2, date: '20.10', time: '11:00', out: true, text: '[media] фото', media: 'photo' },
+  ], 30, k => `open ${k}`)
+  expect(rows.filter(r => r.isDate).map(r => r.text)).toEqual(['19.10', '20.10'])
+  expect(rows.at(-1)).toMatchObject({ media: { mid: 2, kind: 'photo' }, text: 'open photo' })
+  expect(rows.find(r => r.time === '11:00')?.text).toBe('фото')
+})
+
+test('theme button cycles the colour and is kept; the picture button downloads on request', RU, async ($, on) => {
+  const runs: string[][] = []
+  const store: Record<string, unknown> = {}
+  backend(on, runs, argv => argv[1]!.endsWith('tgchat.py') && argv[2] === '111' ? ok(JSON.stringify({ peer: '111', title: 'Anna', kind: 'user', unread: 0,
+    messages: [{ mid: 7, date: '20.10', time: '12:00', out: false, text: '[media] ', media: 'photo' }] }))
+    : argv[1]!.endsWith('tgmedia.py') ? ok('/data/media/111_7.png\n') : undefined, [], store)
+  on('ui.toast', async () => ({ value: undefined }) as any)
+  await $.command.run({ command: 'tg-pane', args: '', origin: { kind: 'user' } } as any)
+  const ui = await $.ui.mount({ plugin: 'tg-pane', surface: 'terminal', ...PANE })
+  await ui.press({ key: 'theme' })
+  expect(await ui.find({ type: 'Button', text: /violet/ })).toBeDefined()
+  await ui.press({ key: 'chat-111' })
+  expect(runs.some(r => r[1]!.endsWith('tgmedia.py'))).toBe(false) // nothing downloaded until asked
+  await ui.press({ key: 'media-7' })
+  expect(script(runs.find(r => r[1]!.endsWith('tgmedia.py'))!)).toEqual(['tgmedia.py', '111', '7'])
   await ui.unmount()
 })

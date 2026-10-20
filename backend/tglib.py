@@ -155,6 +155,9 @@ HISTORY_API_JS = """async ({peer, n, before}) => { const m = appImManager.manage
     if (!x) continue;
     const text = x._ === 'messageService' ? '[service]' : (x.media && x.media._ !== 'messageMediaWebPage' ? '[media] ' : '') + (x.message || '');
     const msg = {mid, date: x.date, out: !!x.pFlags?.out, text};
+    const md = x.media?._ === 'messageMediaPhoto' ? 'photo' : x.media?._ === 'messageMediaDocument' ?
+      (/^image\\//.test(x.media.document?.mime_type || '') ? 'image' : /^video\\//.test(x.media.document?.mime_type || '') ? 'video' : 'file') : '';
+    if (md) msg.media = md;
     if (info.kind === 'group' && !msg.out && x.fromId) {  // who wrote it, in a group
       names[x.fromId] ??= (await (""" + PEER_JS + """)(m, +x.fromId)).title;
       msg.from = names[x.fromId];
@@ -188,12 +191,12 @@ def api(pg, js, arg):
 
 
 def tg_time(sec, now=None):
-    """Time as in Telegram's chat list: today "12:05", this week "Wed", earlier "Oct 1"."""
+    """Time for the chat list: today "12:05", earlier "20.10" (day.month, no weekday names), another year "20.10.25"."""
     if not sec: return ""
     t, now = datetime.fromtimestamp(sec, zone()), now or datetime.now(zone())
     if t.date() == now.date(): return t.strftime("%H:%M")
-    if (now.date() - t.date()).days < 7: return t.strftime("%a")
-    return f"{t.strftime('%b')} {t.day}"
+    if t.year == now.year: return f"{t.day}.{t.month:02d}"
+    return f"{t.day}.{t.month:02d}.{t.year % 100:02d}"
 
 
 def api_folders(pg, names=(), limit=100):
