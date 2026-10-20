@@ -23,17 +23,17 @@ REACT_JS = """async ({peer, mid, emoji}) => { const m = appImManager.managers, p
     await new Promise(r => setTimeout(r, 150));
   } return 'unseen' }"""
 
-EDIT_JS = """async ({peer, mid, text}) => { const A = appImManager.managers.appMessagesManager, p = +peer;
+EDIT_JS = """async ({peer, mid, text}) => { const A = appImManager.managers.appMessagesManager, p = +peer, me = (await appImManager.managers.appUsersManager.getSelf()).id;
   const x = await A.getMessageByPeer(p, mid); if (!x) return 'nomessage';
-  if (!x.pFlags?.out) return 'not yours';
+  if (!x.pFlags?.out && !(p === me && +x.fromId === me)) return 'not yours';
   if (x.message === text) return 'ok';
   await A.editMessage(x, text);
   for (let i = 0; i < 30; i++) { const y = await A.getMessageByPeer(p, mid); if (y && y.message === text) return 'ok'; await new Promise(r => setTimeout(r, 150)); }
   return 'unseen' }"""
 
-DELETE_JS = """async ({peer, mid}) => { const A = appImManager.managers.appMessagesManager, p = +peer;
+DELETE_JS = """async ({peer, mid}) => { const A = appImManager.managers.appMessagesManager, p = +peer, me = (await appImManager.managers.appUsersManager.getSelf()).id;
   const x = await A.getMessageByPeer(p, mid); if (!x) return 'nomessage';
-  if (!x.pFlags?.out) return 'not yours';
+  if (!x.pFlags?.out && !(p === me && +x.fromId === me)) return 'not yours';
   await A.deleteMessages(p, [mid], true);
   for (let i = 0; i < 30; i++) { const y = await A.getMessageByPeer(p, mid); if (!y || y._ === 'messageEmpty') return 'ok'; await new Promise(r => setTimeout(r, 150)); }
   return 'unseen' }"""
@@ -46,7 +46,7 @@ FORWARD_JS = """async ({peer, mid, to}) => { const A = appImManager.managers.app
   await A.forwardMessages({peerId: t, fromPeerId: p, mids: [mid]});
   for (let i = 0; i < 40; i++) {
     const h = await A.getHistory({peerId: t, limit: 1}); const id = h.history[0];
-    if (id && id !== before) { const y = await A.getMessageByPeer(t, id); if (y?.fwd_from && Date.now() / 1000 - y.date < 60) return 'ok'; }
+    if (id && id !== before) { const y = await A.getMessageByPeer(t, id); if ((y?.fwd_from || (t === p && y?.message === x.message)) && Date.now() / 1000 - y.date < 60) return 'ok'; }  // forwarded into the same Saved Messages shows no source
     await new Promise(r => setTimeout(r, 150));
   } return 'unseen' }"""
 

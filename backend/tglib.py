@@ -150,9 +150,9 @@ FOLDERS_API_JS = """async ({names, limit}) => { const m = appImManager.managers,
 
 # One message as the pane wants it: text, kind of media (voice and round videos apart: they can be transcribed), who wrote it
 # in a group, reactions, what it answers, whether it was forwarded or edited.
-MSG_JS = """async (m, p, x, info, names) => {
+MSG_JS = """async (m, p, x, info, names, me) => {
     const text = x._ === 'messageService' ? '[service]' : (x.media && x.media._ !== 'messageMediaWebPage' ? '[media] ' : '') + (x.message || '');
-    const msg = {mid: x.mid, date: x.date, out: !!x.pFlags?.out, text};
+    const msg = {mid: x.mid, date: x.date, out: !!x.pFlags?.out || (p === me && +x.fromId === me), text};  // in Saved Messages nothing has the out flag
     const doc = x.media?._ === 'messageMediaDocument' ? x.media.document : null, at = doc?.attributes || [];
     const md = x.media?._ === 'messageMediaPhoto' ? 'photo' : doc ?
       (at.some(a => a._ === 'documentAttributeAudio' && a.pFlags?.voice) ? 'voice' : at.some(a => a._ === 'documentAttributeVideo' && a.pFlags?.round_message) ? 'round' :
@@ -178,11 +178,11 @@ HISTORY_API_JS = """async ({peer, n, before, query, around, after}) => { const m
   if (query) { opts.query = query; opts.inputFilter = {_: 'inputMessagesFilterEmpty'}; }
   if (around) { opts.offsetId = around; opts.addOffset = -Math.floor(n / 2); }
   if (after) { opts.offsetId = after; opts.addOffset = -n; }
-  const h = await m.appMessagesManager.getHistory(opts), out = [], names = {}, one = """ + MSG_JS + """;
+  const h = await m.appMessagesManager.getHistory(opts), out = [], names = {}, me = (await m.appUsersManager.getSelf()).id, one = """ + MSG_JS + """;
   for (const mid of h.history) {
     const x = await m.appMessagesManager.getMessageByPeer(p, mid);
     if (!x || (after && x.mid <= after)) continue;
-    out.push(await one(m, p, x, info, names));
+    out.push(await one(m, p, x, info, names, me));
   }
   const d = await m.dialogsStorage.getDialogOnly(p);
   return {title: info.title, kind: info.kind, unread: d?.unread_count || 0, messages: out.reverse()}; }"""
