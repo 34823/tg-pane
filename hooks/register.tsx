@@ -443,19 +443,30 @@ async function markRead($: EngineInterface) {
   await fetchChat($)
 }
 
+let sendChain: Promise<unknown> = Promise.resolve() // messages go out one by one, in the order typed
+
 async function send($: EngineInterface, text: string) {
   const peer = await currentPeer($)
   if (!text.trim()) return
   if (!peer) return void $.ui.toast(t.pickFirst)
   lastActive = await $.clock.now()
+  // A fresh, empty field at once, with the cursor in it: the next message can be typed while this one goes out.
+  const next = (await read($, draft)) + 1
+  await update($, draft, () => next)
   await update($, note, () => t.sending)
-  const r = await run($, 'tgmsg.py', ['--peer', peer, text], 300_000)
-  if (r.exitCode !== 0) return void (await failed($, r, t.notSent))
-  await update($, draft, n => n + 1) // a new, empty input field
-  await update($, lift, () => 0)
-  await update($, note, () => t.sent)
-  await loadCache($) // replied = the chat is read, tgmsg zeroed its counter
-  await fetchChat($)
+  for (const wait of [0, 120, 400]) { // the field is drawn on the next render
+    if (wait) await new Promise(r => setTimeout(r, wait))
+    const f = await $.ui.focus({ requestId: PANE, key: `msg-${next}` }).catch(() => ({ deny: 'x' }))
+    if (!('deny' in f)) break
+  }
+  sendChain = sendChain.then(async () => {
+    const r = await run($, 'tgmsg.py', ['--peer', peer, text], 300_000)
+    if (r.exitCode !== 0) return void (await failed($, r, t.notSent))
+    await update($, lift, () => 0)
+    await update($, note, () => t.sent)
+    await loadCache($) // replied = the chat is read, tgmsg zeroed its counter
+    await fetchChat($)
+  })
 }
 
 async function refresh($: EngineInterface) {
@@ -878,7 +889,7 @@ export const register: Register = (on, options) => {
         {peer && !writable && <Text dimColor>{t.readOnly}</Text>}
         {writable && (
           <Box borderStyle="round" borderColor={pal.accent} paddingX={1} width={cols}>
-            {Input ? <Input key={`msg-${n}`} label={`→ ${(title ?? '').slice(0, 20)}`}
+            {Input ? <Input key={`msg-${n}`} autoFocus label={`→ ${(title ?? '').slice(0, 20)}`}
               placeholder={t.placeholder} submitLabel={t.send}
               onSubmit={(value: string) => void send($, value)} /> : <Text dimColor>{t.terminalOnly}</Text>}
           </Box>
