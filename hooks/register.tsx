@@ -890,7 +890,7 @@ export const register: Register = (on, options) => {
         {peer && !writable && <Text dimColor>{t.readOnly}</Text>}
         {writable && (
           <Box borderStyle="round" borderColor={pal.accent} paddingX={1} width={cols}>
-            {Input ? <Input key={`msg-${n}`} autoFocus label={`→ ${(title ?? '').slice(0, 20)}`}
+            {Input ? <Input key={`msg-${n}`} autoFocus rows={3} label={`→ ${(title ?? '').slice(0, 20)}`}
               placeholder={t.placeholder} submitLabel={t.send}
               onSubmit={(value: string) => void send($, value)} /> : <Text dimColor>{t.terminalOnly}</Text>}
           </Box>
