@@ -187,15 +187,15 @@ export function wrapLines(text: string, width: number) {
 type Row = { key: string; text: string; time?: string; out?: boolean; isDate?: boolean; sender?: string; head?: boolean; media?: { mid: number; kind: string } }
 
 // Every message as rows (one per line, whole text, nothing cut), with a date row where the day changes and a row
-// with the «open» button under a picture. `me` null — no direction (a channel); in a group a name row opens each run of one sender's messages.
-export function layoutMessages(messages: Message[], width: number, openLabel: (kind: string) => string = k => k, isGroup = false) {
+// with the «open» button under a picture. `names` undefined — a channel; otherwise a name row opens each run of one sender's messages (in a group the sender is `from`, in a private chat `them`).
+export function layoutMessages(messages: Message[], width: number, openLabel: (kind: string) => string = k => k, names?: { me: string; them?: string }) {
   const out: Row[] = []
   messages.forEach((m, i) => {
     if (m.date && m.date !== messages[i - 1]?.date) out.push({ key: `d${m.mid}`, text: m.date, isDate: true })
     const body = m.text.replace(/^\[media\] ?/, '')
-    const sender = isGroup && !m.out && m.from ? m.from : undefined
+    const sender = !names ? undefined : m.out ? names.me : m.from ?? names.them
     const prev = messages[i - 1]
-    if (sender && (sender !== prev?.from || prev.out || m.date !== prev.date)) out.push({ key: `h${m.mid}`, text: sender, head: true, sender })
+    if (sender && (!prev || sender !== (prev.out ? names!.me : prev.from ?? names!.them) || m.date !== prev.date)) out.push({ key: `h${m.mid}`, text: sender, head: true, sender, out: m.out })
     const lines = wrapLines(body, width)
     lines.forEach((text, j) => out.push({ key: `m${m.mid}-${j}`, text, time: j === 0 ? m.time : undefined, out: m.out, sender }))
     if (m.media && m.media !== 'file') out.push({ key: `o${m.mid}`, text: openLabel(m.media), out: m.out, media: { mid: m.mid, kind: m.media } })
@@ -828,10 +828,12 @@ export const register: Register = (on, options) => {
       </Box>
     )
 
+    const bar = (m: Row) => m.out ? pal.accent : m.sender ? senderColor(m.sender) : undefined // mine — the theme's accent, others — a colour per name
     const inner = right - 4 // border and padding
     const fit = boxH - 3 // border and the title row
     const textW = inner - 9 // bar, space, time
-    const rowsAll = layoutMessages(shown?.messages ?? [], textW, k => t.openMedia(t.mediaKind[k] ?? k), kind === 'group')
+    const rowsAll = layoutMessages(shown?.messages ?? [], textW, k => t.openMedia(t.mediaKind[k] ?? k),
+      kind === 'channel' ? undefined : { me: t.me, them: shown?.title })
     view.total = rowsAll.length
     view.fit = fit
     const lifted = Math.min(hidden, Math.max(0, rowsAll.length - fit))
@@ -860,18 +862,18 @@ export const register: Register = (on, options) => {
           <Box key={m.key} width={inner} justifyContent="center"><Text dimColor>{`── ${m.text} ──`}</Text></Box>
         ) : m.head ? (
           <Box key={m.key} flexDirection="row" width={inner}>
-            <Text color={senderColor(m.sender!)}>▎ </Text>
-            <Text bold wrap="truncate-end" color={senderColor(m.sender!)}>{m.text}</Text>
+            <Text color={bar(m)}>▎ </Text>
+            <Text bold wrap="truncate-end" color={bar(m)}>{m.text}</Text>
           </Box>
         ) : m.media ? (
           <Box key={m.key} flexDirection="row" width={inner}>
-            <Text color={m.sender ? senderColor(m.sender) : m.out ? pal.accent : undefined} dimColor={!m.out && !m.sender}>▎ </Text>
+            <Text color={bar(m)} dimColor={!m.out && !m.sender}>▎ </Text>
             <Button key={`media-${m.media.mid}`} plain onPress={() => void openMedia($, m.media!.mid, cols)}>{m.text}</Button>
           </Box>
         ) : (
           <Box key={m.key} flexDirection="row" width={inner}>
-            <Text color={m.sender ? senderColor(m.sender) : m.out ? pal.accent : undefined} dimColor={!m.out && !m.sender}>▎ </Text>
-            <Box width={textW}><Text wrap="truncate-end" color={m.out ? pal.accent : undefined}>{m.text}</Text></Box>
+            <Text color={bar(m)} dimColor={!m.out && !m.sender}>▎ </Text>
+            <Box width={textW}><Text wrap="truncate-end" color={bar(m)}>{m.text}</Text></Box>
             <Box width={6} flexShrink={0} justifyContent="flex-end"><Text dimColor>{m.time ?? ''}</Text></Box>
           </Box>
         ))}
