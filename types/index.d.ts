@@ -25,7 +25,6 @@ declare module 'claude-code' {
       login: Login | null
       note: string
       draft: number
-      typed: string
       askZone: boolean
     }
   }
