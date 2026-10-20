@@ -99,7 +99,6 @@ const theme = atom({ plugin: 'tg-pane', key: 'theme' } as const, 0) // index int
 const listTop = atom({ plugin: 'tg-pane', key: 'listTop' } as const, 0) // first shown row of the chat list
 const login = atom({ plugin: 'tg-pane', key: 'login' } as const, null as Login | null) // not logged in: what to show
 const note = atom({ plugin: 'tg-pane', key: 'note' } as const, '')
-const typedRows = atom({ plugin: 'tg-pane', key: 'typedRows' } as const, 1) // lines the typed text wraps to
 const draft = atom({ plugin: 'tg-pane', key: 'draft' } as const, 0)
 const askZone = atom({ plugin: 'tg-pane', key: 'askZone' } as const, false) // no time zone known: ask first
 
@@ -368,7 +367,7 @@ async function loadOlder($: EngineInterface) {
 }
 
 // What the last drawing showed, for the wheel and the keys: all rows of the open chat, the rows that fit, the left column.
-const view = { total: 0, fit: 0, leftWidth: 0, listLen: 0, listFit: 0, inputAvail: 0 }
+const view = { total: 0, fit: 0, leftWidth: 0, listLen: 0, listFit: 0 }
 
 // Moves the open chat's window by `step` rows (positive — toward older), at once; older messages load in the
 // background when the top is near, the view stays where it is.
@@ -444,19 +443,6 @@ async function markRead($: EngineInterface) {
   await fetchChat($)
 }
 
-async function typing($: EngineInterface, v: string) {
-  const rows = Math.max(1, Math.ceil((v.length + 1) / (view.inputAvail || 40)))
-  if (rows === (await read($, typedRows))) return
-  await update($, typedRows, () => rows)
-  // the redraw takes the cursor away (it would land in the Claude prompt): put it back into the field
-  const key = `msg-${await read($, draft)}`
-  for (const wait of [0, 60, 200]) {
-    if (wait) await new Promise(r => setTimeout(r, wait))
-    const f = await $.ui.focus({ requestId: PANE, key }).catch(() => ({ deny: 'x' }))
-    if (!('deny' in f)) break
-  }
-}
-
 let sendChain: Promise<unknown> = Promise.resolve() // messages go out one by one, in the order typed
 
 async function send($: EngineInterface, text: string) {
@@ -467,7 +453,6 @@ async function send($: EngineInterface, text: string) {
   // A fresh, empty field at once, with the cursor in it: the next message can be typed while this one goes out.
   const next = (await read($, draft)) + 1
   await update($, draft, () => next)
-  await update($, typedRows, () => 1)
   await update($, note, () => t.sending)
   for (const wait of [0, 120, 400]) { // the field is drawn on the next render
     if (wait) await new Promise(r => setTimeout(r, wait))
@@ -819,9 +804,8 @@ export const register: Register = (on, options) => {
 
     // Height budget: header, gap, [folder bar + gap], boxed input (3), status line, one spare row (so the engine
     // always has something to scroll and keeps raising the wheel for us).
-    const typed = await read($, typedRows)
-    const inputRows = writable ? 2 + Math.min(typed, 6) : 0 // the field wraps; a fixed 3 hid the second line
-    view.inputAvail = Math.max(10, cols - 4 - 2 - ((title ?? '').slice(0, 20).length + 3) - (t.send.length + 4))
+    // Room for three lines of typed text: the field wraps by itself, and a redraw while typing takes the cursor away.
+    const inputRows = writable ? 5 : 0
     const boxH = Math.max(7, bodyRows - 2 - (folderBar ? 2 : 0) - inputRows - 2)
     const listFit = boxH - 2
     const sorted = [...listed].sort(unreadFirst)
@@ -906,7 +890,7 @@ export const register: Register = (on, options) => {
         {peer && !writable && <Text dimColor>{t.readOnly}</Text>}
         {writable && (
           <Box borderStyle="round" borderColor={pal.accent} paddingX={1} width={cols}>
-            {Input ? <Input key={`msg-${n}`} autoFocus onInput={(v: string) => void typing($, v)} label={`→ ${(title ?? '').slice(0, 20)}`}
+            {Input ? <Input key={`msg-${n}`} autoFocus label={`→ ${(title ?? '').slice(0, 20)}`}
               placeholder={t.placeholder} submitLabel={t.send}
               onSubmit={(value: string) => void send($, value)} /> : <Text dimColor>{t.terminalOnly}</Text>}
           </Box>
