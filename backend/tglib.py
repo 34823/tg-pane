@@ -148,21 +148,41 @@ FOLDERS_API_JS = """async ({names, limit}) => { const m = appImManager.managers,
     }
   } return out; }"""
 
-HISTORY_API_JS = """async ({peer, n, before}) => { const m = appImManager.managers, p = +peer, info = await (""" + PEER_JS + """)(m, p);
-  const h = await m.appMessagesManager.getHistory({peerId: p, limit: n, offsetId: before || 0}), out = [], names = {};
-  for (const mid of h.history) {
-    const x = await m.appMessagesManager.getMessageByPeer(p, mid);
-    if (!x) continue;
+# One message as the pane wants it: text, kind of media (voice and round videos apart: they can be transcribed), who wrote it
+# in a group, reactions, what it answers, whether it was forwarded or edited.
+MSG_JS = """async (m, p, x, info, names) => {
     const text = x._ === 'messageService' ? '[service]' : (x.media && x.media._ !== 'messageMediaWebPage' ? '[media] ' : '') + (x.message || '');
-    const msg = {mid, date: x.date, out: !!x.pFlags?.out, text};
-    const md = x.media?._ === 'messageMediaPhoto' ? 'photo' : x.media?._ === 'messageMediaDocument' ?
-      (/^image\\//.test(x.media.document?.mime_type || '') ? 'image' : /^video\\//.test(x.media.document?.mime_type || '') ? 'video' : 'file') : '';
+    const msg = {mid: x.mid, date: x.date, out: !!x.pFlags?.out, text};
+    const doc = x.media?._ === 'messageMediaDocument' ? x.media.document : null, at = doc?.attributes || [];
+    const md = x.media?._ === 'messageMediaPhoto' ? 'photo' : doc ?
+      (at.some(a => a._ === 'documentAttributeAudio' && a.pFlags?.voice) ? 'voice' : at.some(a => a._ === 'documentAttributeVideo' && a.pFlags?.round_message) ? 'round' :
+       /^image\\//.test(doc.mime_type || '') ? 'image' : /^video\\//.test(doc.mime_type || '') ? 'video' : 'file') : '';
     if (md) msg.media = md;
     if (info.kind === 'group' && !msg.out && x.fromId) {  // who wrote it, in a group
       names[x.fromId] ??= (await (""" + PEER_JS + """)(m, +x.fromId)).title;
       msg.from = names[x.fromId];
     }
-    out.push(msg);
+    const rs = (x.reactions?.results || []).map(r => ({e: r.reaction?.emoticon || (r.reaction?._ === 'reactionPaid' ? '⭐' : '✦'), n: r.count, me: r.chosen_order !== undefined}));
+    if (rs.length) msg.reactions = rs;
+    const rid = x.reply_to?.reply_to_msg_id;
+    if (rid) { const r = await m.appMessagesManager.getMessageByPeer(p, rid);
+      msg.reply = {mid: rid, text: (r?.message || (r?.media ? '[media]' : '')).slice(0, 80)}; }
+    if (x.fwd_from) msg.fwd = x.fwd_from.from_name || true;
+    if (x.edit_date) msg.edited = true;
+    return msg; }"""
+
+# Chat history. Plain: the newest n (or n older than `before`). `query` — only messages with these words (newest first
+# there), `around` — a window centred on that message, `after` — n messages newer than that one.
+HISTORY_API_JS = """async ({peer, n, before, query, around, after}) => { const m = appImManager.managers, p = +peer, info = await (""" + PEER_JS + """)(m, p);
+  const opts = {peerId: p, limit: n, offsetId: before || 0};
+  if (query) { opts.query = query; opts.inputFilter = {_: 'inputMessagesFilterEmpty'}; }
+  if (around) { opts.offsetId = around; opts.addOffset = -Math.floor(n / 2); }
+  if (after) { opts.offsetId = after; opts.addOffset = -n; }
+  const h = await m.appMessagesManager.getHistory(opts), out = [], names = {}, one = """ + MSG_JS + """;
+  for (const mid of h.history) {
+    const x = await m.appMessagesManager.getMessageByPeer(p, mid);
+    if (!x || (after && x.mid <= after)) continue;
+    out.push(await one(m, p, x, info, names));
   }
   const d = await m.dialogsStorage.getDialogOnly(p);
   return {title: info.title, kind: info.kind, unread: d?.unread_count || 0, messages: out.reverse()}; }"""
@@ -211,7 +231,7 @@ def api_folders(pg, names=(), limit=100):
     out = api(pg, FOLDERS_API_JS, {"names": list(names), "limit": limit})
     for chats in out.values():
         for c in chats:
-            c["time"] = tg_time(c.pop("date")); c["title"] = clean(c["title"]); c["last"] = c["last"].replace("\n", " ")[:300]
+            c["ts"] = c["date"]; c["time"] = tg_time(c.pop("date")); c["title"] = clean(c["title"]); c["last"] = c["last"].replace("\n", " ")[:300]
     return out
 
 
@@ -222,11 +242,11 @@ def api_history(pg, peer, n, before=0):
     return h["title"], h["messages"]
 
 
-def api_chat(pg, peer, n, before=0):
-    h = api(pg, HISTORY_API_JS, {"peer": str(peer), "n": n, "before": before})
+def api_chat(pg, peer, n, before=0, query="", around=0, after=0):
+    h = api(pg, HISTORY_API_JS, {"peer": str(peer), "n": n, "before": before, "query": query, "around": around, "after": after})
     for m in h["messages"]:
         t = datetime.fromtimestamp(m["date"], zone())
-        m["date"], m["time"] = f"{t.day}.{t.month:02d}", t.strftime("%H:%M")
+        m["ts"], m["date"], m["time"] = m["date"], f"{t.day}.{t.month:02d}", t.strftime("%H:%M")
         if "from" in m: m["from"] = clean(m["from"])
     h["title"] = clean(h["title"])
     return h

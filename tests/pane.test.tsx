@@ -1,5 +1,5 @@
 import { expect, mock, test } from 'claude-code/testing'
-import { layoutMessages, wrapLines } from '../hooks/register'
+import { isDoublePress, layoutMessages, wrapLines } from '../hooks/register'
 
 const CACHE = {
   updated: 1759750000,
@@ -77,8 +77,13 @@ test('channels: folders → a folder → a channel (marked read on open) → its
   expect(await ui.find({ type: 'Button', text: /Interesting — 9/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /Markets News 7 · Чат клуба 2/ })).toBeDefined()
   expect(await ui.find({ type: 'Button', text: /Личные/ })).toBeDefined() // the tab, not a folder row
-  await ui.press({ key: 'digest-Interesting' })
+  await ui.press({ key: 'digest-f:Interesting' }) // «Summary» opens its choices: unread, day, week, month
+  await ui.press({ key: 'sum-unread-f:Interesting' })
   expect(prompts[0]).toContain('tgunread.py "Interesting"')
+  expect(prompts[0]).not.toContain('--since')
+  await ui.press({ key: 'digest-f:Interesting' })
+  await ui.press({ key: 'sum-week-f:Interesting' })
+  expect(prompts[1]).toContain('tgunread.py "Interesting" --since week')
 
   await ui.press({ key: 'folder-Interesting' })
   expect(await ui.find({ type: 'Button', text: /Markets News \(7\)/ })).toBeDefined()
@@ -91,8 +96,12 @@ test('channels: folders → a folder → a channel (marked read on open) → its
   expect(script(runs.at(-1)!)).toEqual(['tgchat.py', '-6', '40'])
   expect(await ui.find({ type: 'Input', key: 'msg-0' })).toBeDefined()
 
-  await ui.press({ key: 'digest-chat' })
-  expect(prompts[1]).toContain('tgunread.py --peer -6')
+  await ui.press({ key: 'digest-c:-6' })
+  await ui.press({ key: 'sum-unread-c:-6' })
+  expect(prompts[2]).toContain('tgunread.py --peer -6')
+  await ui.press({ key: 'digest-c:-6' })
+  await ui.press({ key: 'sum-day-c:-6' })
+  expect(prompts[3]).toContain('tgunread.py --peer -6 --since day')
 
   await ui.press({ key: 'readall' })
   expect(script(runs.at(-1)!)).toEqual(['tgunread.py', 'Interesting', '--mark-only'])
@@ -200,27 +209,25 @@ test('restart: the pane opens where it was left (from the store)', RU, async ($,
   await ui.unmount()
 })
 
-test('a group shows who wrote; «Private» has a summary that marks nothing read', RU, async ($, on) => {
-  const prompts: string[] = []
+test('a group shows who wrote; «Private» has no summary, a chat there has search instead of «read»', RU, async ($, on) => {
   backend(on, [], argv => argv[1]!.endsWith('tgchat.py') && argv[2] === '-6' ? ok(JSON.stringify({ peer: '-6', title: 'Чат клуба', kind: 'group', unread: 0,
     messages: [{ mid: 1, date: '8.10', time: '12:00', out: false, from: 'Петя', text: 'кто на тренировку?' }] })) : undefined)
-  on('prompt.submit', async (_, e) => { prompts.push(e.text); return { text: e.text } })
+  on('prompt.submit', async (_, e) => ({ text: e.text }))
   on('ui.toast', async () => ({ value: undefined }) as any)
   await $.command.run({ command: 'tg-pane', args: '', origin: { kind: 'user' } } as any)
   const ui = await $.ui.mount({ plugin: 'tg-pane', surface: 'terminal', ...PANE })
-  await ui.press({ key: 'digest-private' })
-  expect(prompts[0]).toContain('tgunread.py "Личные"')
-  expect(prompts[0]).toContain('НЕ')
+  expect(await ui.find({ type: 'Button', key: 'digest-private' })).toBeUndefined()
   await ui.press({ key: 'chat-111' })
-  await ui.press({ key: 'digest-chat' })
-  expect(prompts[1]).toContain('tgunread.py --peer 111 --private')
+  expect(await ui.find({ type: 'Button', key: 'digest-chat' })).toBeUndefined()
+  expect(await ui.find({ type: 'Button', key: 'mark-read' })).toBeUndefined()
+  expect(await ui.find({ type: 'Button', key: 'search-chat' })).toBeDefined()
   await ui.press({ key: 'tab-channels' })
   expect(await ui.find({ type: 'Button', text: /Категории/ })).toBeDefined()
   expect(await ui.find({ type: 'Button', key: 'folder-@all' })).toBeDefined()
   await ui.press({ key: 'folder-Interesting' })
   await ui.press({ key: 'chat--6' })
   expect(await ui.find({ type: 'Text', text: /^Петя$/ })).toBeDefined() // the name on its own row
-  expect(await ui.find({ type: 'Text', text: /^кто на тренировку\?$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /кто на тренировку\?/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /^12:00$/ })).toBeDefined()
   await ui.unmount()
 })
@@ -273,4 +280,174 @@ test('theme button cycles the colour and is kept; the picture button downloads o
   expect(runs.some(r => r[1]!.endsWith('tgview.py') && r[2] === 'clear')).toBe(true)
   expect(await ui.find({ type: 'Text', text: /Anna/ })).toBeDefined() // closed — the chat is back (its row in the list is now text)
   await ui.unmount()
+})
+
+// ---- v0.5: picking a message, reply, edit, delete, reaction, forward, search, transcripts
+
+const MINE = JSON.stringify({ peer: '111', title: 'Anna', kind: 'user', unread: 0, messages: [
+  { mid: 5, date: '20.10', time: '12:00', out: false, text: 'привет' },
+  { mid: 6, date: '20.10', time: '12:01', out: true, text: 'моё сообщение' },
+  { mid: 7, date: '20.10', time: '12:02', out: false, text: '[media] ', media: 'voice' },
+  { mid: 8, date: '20.10', time: '12:03', out: false, text: 'с реакцией', reactions: [{ e: '👍', n: 2, me: true }], reply: { mid: 5, text: 'привет' } },
+] })
+const withChat = (extra?: (argv: string[]) => any) => (argv: string[]) => {
+  const custom = extra?.(argv)
+  if (custom) return custom
+  return argv[1]!.endsWith('tgchat.py') && argv[2] === '111' && !argv.includes('--query') && !argv.includes('--around') ? ok(MINE) : undefined
+}
+async function open(on: any, runs: string[][], extra?: (argv: string[]) => any) {
+  backend(on, runs, withChat(extra))
+  on('ui.toast', async () => ({ value: undefined }) as any)
+}
+
+test('two presses within a moment are a double press, a slow one is not', () => {
+  expect(isDoublePress({ mid: 5, at: 1000 }, 5, 1300)).toBe(true)
+  expect(isDoublePress({ mid: 5, at: 1000 }, 5, 1600)).toBe(false)
+  expect(isDoublePress({ mid: 5, at: 1000 }, 6, 1100)).toBe(false)
+})
+
+test('one press picks a message and shows its actions; only my own can be edited or deleted', RU, async ($, on) => {
+  const runs: string[][] = []
+  await open(on, runs)
+  await $.command.run({ command: 'tg-pane', args: '', origin: { kind: 'user' } } as any)
+  const ui = await $.ui.mount({ plugin: 'tg-pane', surface: 'terminal', ...PANE })
+  await ui.press({ key: 'chat-111' })
+  expect(await ui.find({ type: 'Button', key: 'act-fwd' })).toBeUndefined() // nothing picked: the title row
+  await ui.press({ key: 'pick-m5-0' })
+  expect(await ui.find({ type: 'Button', key: 'act-fwd' })).toBeDefined()
+  expect(await ui.find({ type: 'Button', key: 'act-react' })).toBeDefined()
+  expect(await ui.find({ type: 'Button', key: 'act-edit' })).toBeUndefined() // not mine
+  expect(await ui.find({ type: 'Button', key: 'act-del' })).toBeUndefined()
+  await ui.press({ key: 'pick-m6-0' })
+  expect(await ui.find({ type: 'Button', key: 'act-edit' })).toBeDefined()
+  expect(await ui.find({ type: 'Button', key: 'act-del' })).toBeDefined()
+  await ui.press({ key: 'act-x' })
+  expect(await ui.find({ type: 'Button', key: 'act-fwd' })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('a reply goes out as an answer to the picked message', RU, async ($, on) => {
+  const runs: string[][] = []
+  await open(on, runs)
+  await $.command.run({ command: 'tg-pane', args: '', origin: { kind: 'user' } } as any)
+  const ui = await $.ui.mount({ plugin: 'tg-pane', surface: 'terminal', ...PANE })
+  await ui.press({ key: 'chat-111' })
+  await ui.press({ key: 'pick-m5-0' })
+  await ui.press({ key: 'act-reply' })
+  expect(await ui.find({ type: 'Button', key: 'mode-x' })).toBeDefined() // «↪ ответ: …» with ✕ in the top row
+  await ui.input({ key: 'msg-0', text: 'отвечаю' })
+  expect(runs.some(a => script(a).join('|') === 'tgmsg.py|--peer|111|--reply|5|отвечаю')).toBe(true)
+  await ui.unmount()
+})
+
+test('delete asks first and deletes only on «yes»; a reaction and a forward go through tgact.py', RU, async ($, on) => {
+  const runs: string[][] = []
+  await open(on, runs)
+  await $.command.run({ command: 'tg-pane', args: '', origin: { kind: 'user' } } as any)
+  const ui = await $.ui.mount({ plugin: 'tg-pane', surface: 'terminal', ...PANE })
+  await ui.press({ key: 'chat-111' })
+  const acts = () => runs.filter(r => r[1]!.endsWith('tgact.py')).map(script)
+
+  await ui.press({ key: 'pick-m6-0' })
+  await ui.press({ key: 'act-del' })
+  await ui.press({ key: 'del-no' })
+  expect(acts()).toEqual([])
+  await ui.press({ key: 'act-del' })
+  await ui.press({ key: 'del-yes' })
+  expect(acts()).toEqual([['tgact.py', 'delete', '111', '6']])
+  expect(await ui.find({ type: 'Button', key: 'pick-m6-0' })).toBeUndefined() // gone from the window
+
+  await ui.press({ key: 'pick-m5-0' })
+  await ui.press({ key: 'act-react' })
+  await ui.press({ key: 'react-👍' })
+  expect(acts().at(-1)).toEqual(['tgact.py', 'react', '111', '5', '👍'])
+
+  await ui.press({ key: 'pick-m8-0' }) // (the test clock stands still: the same message twice would be a double press)
+  await ui.press({ key: 'pick-m5-0' })
+  await ui.press({ key: 'act-fwd' })
+  await ui.press({ key: 'fwd-111' }) // choosing a chat does not send yet…
+  expect(acts().at(-1)![1]).toBe('react')
+  await ui.press({ key: 'fwd-yes' }) // …the question does
+  expect(acts().at(-1)).toEqual(['tgact.py', 'forward', '111', '5', '111'])
+  await ui.unmount()
+})
+
+test('edit puts my text in the field and sends the new one through tgact.py', RU, async ($, on) => {
+  const runs: string[][] = []
+  await open(on, runs)
+  await $.command.run({ command: 'tg-pane', args: '', origin: { kind: 'user' } } as any)
+  const ui = await $.ui.mount({ plugin: 'tg-pane', surface: 'terminal', ...PANE })
+  await ui.press({ key: 'chat-111' })
+  await ui.press({ key: 'pick-m6-0' })
+  await ui.press({ key: 'act-edit' })
+  const field = await ui.find({ type: 'Input', key: 'msg-1' })
+  expect(field).toBeDefined()
+  await ui.input({ key: 'msg-1', text: 'исправил' })
+  expect(runs.some(a => script(a).join('|') === 'tgact.py|edit|111|6|исправил')).toBe(true)
+  expect(runs.some(a => a[1]!.endsWith('tgmsg.py'))).toBe(false) // an edit is not a new message
+  await ui.unmount()
+})
+
+test('search in a chat: hits, then a window around the chosen one; «to newest» returns', RU, async ($, on) => {
+  const runs: string[][] = []
+  await open(on, runs, argv => {
+    if (!argv[1]!.endsWith('tgchat.py')) return undefined
+    if (argv.includes('--query')) return ok(JSON.stringify({ peer: '111', title: 'Anna', kind: 'user', messages: [{ mid: 3, date: '1.10', time: '09:00', out: false, text: 'про кофе' }] }))
+    if (argv.includes('--around')) return ok(JSON.stringify({ peer: '111', title: 'Anna', kind: 'user', messages: [{ mid: 2, date: '1.10', time: '08:59', out: false, text: 'до' }, { mid: 3, date: '1.10', time: '09:00', out: false, text: 'про кофе' }] }))
+  })
+  await $.command.run({ command: 'tg-pane', args: '', origin: { kind: 'user' } } as any)
+  const ui = await $.ui.mount({ plugin: 'tg-pane', surface: 'terminal', ...PANE })
+  await ui.press({ key: 'chat-111' })
+  await ui.press({ key: 'search-chat' })
+  await ui.input({ key: 'chat-q', text: 'кофе' })
+  expect(runs.some(a => script(a).join('|') === 'tgchat.py|111|30|--query|кофе')).toBe(true)
+  await ui.press({ key: 'qhit-3' })
+  expect(runs.some(a => script(a).join('|') === 'tgchat.py|111|40|--around|3')).toBe(true)
+  expect(await ui.find({ type: 'Button', key: 'to-new' })).toBeDefined()
+  await ui.press({ key: 'to-new' })
+  expect(await ui.find({ type: 'Button', key: 'to-new' })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('search above the chat list: chat names, then messages from Telegram', RU, async ($, on) => {
+  const runs: string[][] = []
+  await open(on, runs, argv => argv[1]!.endsWith('tgsearch.py')
+    ? ok(JSON.stringify({ hits: [{ peer: '222', title: 'Боря', mid: 9, date: '2.10', time: '10:00', out: false, text: 'встречаемся у метро' }] })) : undefined)
+  await $.command.run({ command: 'tg-pane', args: '', origin: { kind: 'user' } } as any)
+  const ui = await $.ui.mount({ plugin: 'tg-pane', surface: 'terminal', ...PANE })
+  await ui.input({ key: 'list-q', text: 'метро' })
+  expect(script(runs.find(a => a[1]!.endsWith('tgsearch.py'))!)).toEqual(['tgsearch.py', 'метро', '15'])
+  expect(await ui.find({ type: 'Button', key: 'chat-111' })).toBeUndefined() // no chat is named «метро»
+  await ui.press({ key: 'hit-222-9' })
+  expect(runs.some(a => script(a).join('|') === 'tgchat.py|222|40|--around|9')).toBe(true)
+  await ui.press({ key: 'list-clear' })
+  expect(await ui.find({ type: 'Button', key: 'chat-111' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('a voice message is transcribed on request and the text stays under it', RU, async ($, on) => {
+  const runs: string[][] = []
+  await open(on, runs, argv => (argv[1]!.endsWith('tgact.py') && argv[2] === 'transcribe' ? ok('текст голосового\n') : undefined))
+  await $.command.run({ command: 'tg-pane', args: '', origin: { kind: 'user' } } as any)
+  const ui = await $.ui.mount({ plugin: 'tg-pane', surface: 'terminal', ...PANE })
+  await ui.press({ key: 'chat-111' })
+  expect(runs.some(a => a[1]!.endsWith('tgact.py'))).toBe(false) // nothing is asked for until the button
+  await ui.press({ key: 'tr-7' })
+  expect(script(runs.find(a => a[1]!.endsWith('tgact.py'))!)).toEqual(['tgact.py', 'transcribe', '111', '7'])
+  expect(await ui.find({ type: 'Text', text: /текст голосового/ })).toBeDefined()
+  expect(await ui.find({ type: 'Button', key: 'tr-7' })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('layout: what a message answers, reactions and a transcript are quiet rows of that message', () => {
+  const rows = layoutMessages([
+    { mid: 1, date: '1.1', time: '10:00', out: false, text: 'ответ', reply: { mid: 0, text: 'вопрос' }, fwd: 'Иван', reactions: [{ e: '👍', n: 2, me: true }, { e: '🔥', n: 1, me: false }] },
+    { mid: 2, date: '1.1', time: '10:01', out: false, text: '[media] ', media: 'voice' },
+  ], 30, k => `label ${k}`, undefined, { 2: 'расшифровка' })
+  expect(rows.filter(r => r.mid === 1 && r.meta).map(r => r.text)).toEqual(['↩ вопрос', '↪ Иван', '[👍 2]  🔥 1'])
+  expect(rows.filter(r => r.mid === 1 && r.line)).toHaveLength(1)
+  expect(rows.some(r => r.trans)).toBe(false) // the transcript is there, no button
+  expect(rows.filter(r => r.mid === 2 && r.meta).map(r => r.text)).toEqual(['♪ расшифровка'])
+  const idle = layoutMessages([{ mid: 2, date: '1.1', time: '10:01', out: false, text: '[media] ', media: 'round' }], 30, k => `label ${k}`)
+  expect(idle.find(r => r.trans)).toMatchObject({ trans: { mid: 2, kind: 'round' }, text: 'label round' })
 })

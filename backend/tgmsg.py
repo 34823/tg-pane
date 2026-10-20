@@ -5,6 +5,9 @@ Only what the user typed. Checks the chat, sends one message, checks it went out
 import sys
 from tglib import page, reset, open_peer, close_chat, zero_unread, api_mark_read, api, MSGS_JS
 
+reply = 0  # --reply <mid>: send as an answer to that message (by id only)
+if "--reply" in sys.argv:
+    i = sys.argv.index("--reply"); reply = int(sys.argv[i + 1]); del sys.argv[i:i + 2]
 args = [a for a in sys.argv[1:] if a != "--dry"]
 dry = "--dry" in sys.argv
 peer = args[1] if args[0] == "--peer" else None
@@ -12,11 +15,11 @@ name, text = (None, args[2]) if peer else (args[0], args[1])
 if not text.strip():
     sys.exit("empty text — not sending")
 # By id: through Telegram Web's own sendText, no chat opened, no fixed waits (~0.1 s instead of ~12 s).
-SEND_JS = """async ({peer, text}) => { const m = appImManager.managers.appMessagesManager, p = +peer;
+SEND_JS = """async ({peer, text, reply}) => { const m = appImManager.managers.appMessagesManager, p = +peer;
   if (p < 0) { const c = await appImManager.managers.appChatsManager.getChat(-p);
     if (!c) return 'nochat';
     if (c._ === 'channel' && c.pFlags?.broadcast) return 'channel (no input field)'; }
-  await m.sendText({peerId: p, text});
+  await m.sendText(reply ? {peerId: p, text, replyToMsgId: reply} : {peerId: p, text});
   for (let i = 0; i < 40; i++) {
     const h = await m.getHistory({peerId: p, limit: 3});
     for (const id of h.history) {
@@ -28,11 +31,12 @@ SEND_JS = """async ({peer, text}) => { const m = appImManager.managers.appMessag
 
 with page() as pg:
     if peer and not dry:
-        res = api(pg, SEND_JS, {"peer": peer, "text": text})
+        res = api(pg, SEND_JS, {"peer": peer, "text": text, "reply": reply})
         if res == "ok":
             api_mark_read(pg, peer)  # replied = the chat is read
             print("sent"); sys.exit(0)
         sys.exit("cannot see the sent message in the chat — check it" if res == "unseen" else f"send failed: {res}")
+    if reply: sys.exit("--reply needs the id-based send (no --dry)")
     if peer:
         reset(pg)
         title = open_peer(pg, peer)

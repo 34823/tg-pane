@@ -27,12 +27,17 @@ Then `/tg-pane`, scan the QR code with your phone — done.
 ## Features
 
 - **Private** — chats with people, unread first; read a chat without sending «read», reply from the input field.
-  The other person sees «read» only when you reply or press **Mark read**. **Summary** retells the unread private
-  chats (or one chat) in the conversation — without marking them read.
+  The other person sees «read» only when you reply.
 - **Categories** — **All chats**, then your Telegram folders, with unread counts and a preview. Open one to see its
-  chats, open a chat to read it (in a group, with who wrote what), scroll back with the mouse wheel (or **▲ / ▼**); a picture has an **▣ open** row — it is downloaded only then and drawn over the chat inside the pane (✕ closes). **Theme** in the header flips the colour. **Summary** on a folder
-  or a chat asks Claude to read the unread posts and retell them by topic, right in the conversation. **Mark all read**
+  chats, open a chat to read it (in a group, with who wrote what), scroll back with the mouse wheel (or **▲ / ▼**); a picture has an **▣ open** row — it is downloaded only then and drawn over the chat inside the pane (✕ closes). **Theme** in the header flips the colour. **Summary ▾** on a folder
+  or a channel/group offers *unread* (marks them read), or *day / week / month* (marks nothing read): Claude reads the posts and retells them by topic, right in the conversation. **Mark all read**
   clears a folder.
+- **Search** — the field above the chat list finds chats by name at once and, on Enter, messages in all chats (Telegram's own search);
+  **⌕** in a chat's top row searches inside that chat, and a hit opens a window around the message.
+- **Messages** — one press picks a message (it is lit, its actions replace the top row): **reply**, **edit** and **delete** (only my own; delete asks first),
+  **react**, **forward** (choose a chat, then confirm). Two presses in a row make it the target of a reply: the field says «↪», the message stays lit.
+  Replies, forwards, reactions and «edited» show under/next to the message.
+- **Voice messages and video notes** — «♪ voice · transcribe» asks Telegram (needs **Telegram Premium**) for the text and keeps it under the message.
 - Times on the right, in your time zone: the system's, or — on a server set to UTC — asked once in the pane.
 - The pane opens where you left it, after `/clear` and after a restart.
 - Login by QR code drawn in the pane; works in a narrow pane too (list, then chat).
@@ -53,7 +58,7 @@ There is no Telegram API key and no bot: the mod drives **Telegram Web** (web.te
 account, in a headless Chromium on your machine, and reads it through Telegram Web's own internal API — the same
 calls its interface makes. Nothing leaves your machine except what Telegram Web itself sends. The browser is
 touched only while the pane is open and in use (counters once a minute, the open chat once a minute, a pause after
-10 idle minutes and whenever Telegram answers FLOOD_WAIT). Nothing is sent but what you type.
+10 idle minutes and whenever Telegram answers FLOOD_WAIT). The mod writes to Telegram only when you press a button for it: a message or a reply you type, an edit or a delete of your own message, a reaction, a forward.
 
 The backend is a few Python scripts in `backend/` (Playwright). They also work on their own:
 
@@ -61,27 +66,30 @@ The backend is a few Python scripts in `backend/` (Playwright). They also work o
 |---|---|
 | `tgbrowser.py start\|stop\|status\|login` | the headless Chromium; `login` prints the QR code in the terminal and asks for the cloud password |
 | `tgcache.py [folder…]` | unread counters and previews of your folders into the cache |
-| `tgchat.py <peer> [N] [--read] [--before <mid>]` | a chat's history as JSON |
-| `tgmsg.py --peer <peer> "<text>"` | send one message, check it went out |
+| `tgchat.py <peer> [N] [--read] [--before\|--around\|--after <mid>] [--query <words>]` | a chat's history as JSON; `--query` searches inside the chat |
+| `tgmsg.py --peer <peer> [--reply <mid>] "<text>"` | send one message (as an answer, if asked), check it went out |
+| `tgsearch.py "<words>" [N]` | search the text of messages in all chats, JSON |
+| `tgact.py react\|edit\|delete\|forward\|transcribe <peer> <mid> [value]` | one action on one message, checked by reading it again |
 | `tgmedia.py <peer> <mid>` | downloads one message's picture (photo, image, video preview) to the data folder as PNG, only when you press «open» |
-| `tgunread.py "<folder>" \| --peer <id> \| --private [--mark-only]` | unread posts as text for a model; channels and groups are marked read, private chats (and `--private`) never |
+| `tgunread.py "<folder>" \| --peer <id> \| --private [--mark-only] [--since day\|week\|month]` | unread posts as text for a model; channels and groups are marked read, private chats (and `--private`) never; `--since` — everything posted in the period, nothing marked read |
 
 ## What it runs, reads and sends
 
 The plugin is a pane (`hooks/register.tsx`) plus the Python scripts in `backend/` (Playwright).
 
 - **Runs:** the Python from the **Python** option (default `python3`) with one of the scripts in `backend/`
-  (`tgbrowser.py`, `tgcache.py`, `tgchat.py`, `tgmsg.py`, `tgunread.py`) and its arguments; the command is
+  (`tgbrowser.py`, `tgcache.py`, `tgchat.py`, `tgmsg.py`, `tgunread.py`, `tgsearch.py`, `tgact.py`, `tgmedia.py`, `tgview.py`) and its arguments; the command is
   `<python> <plugin folder>/backend/<script> <args>`, no shell. `tgbrowser.py` starts a headless Chromium
   (Playwright's, with a debugging port on `127.0.0.1:9444` only) with its own profile in the data folder.
   Nothing else is started.
 - **Reads:** Telegram Web (`web.telegram.org/k`) in that browser, logged in to *your* account: folders, unread counters,
   chat history, and the browser profile — which **is** your Telegram session. The pane also reads `HOME` (only to find the
   default data folder) and keeps its cache, lock and `config.json` in the data folder. It does not read your project files.
-- **Sends to the network:** only what Telegram Web itself sends to Telegram (reading, and «mark read» when you press it or open a channel with that
-  option on), plus a message when you type one in the pane's input field. There is no other server and no analytics.
+- **Sends to the network:** only what Telegram Web itself sends to Telegram: reading (and «read» when you open a channel with that option on, or reply),
+  and, each only on its button, a message or reply you type, an edit or delete of your own message, a reaction, a forward (the chat is chosen and confirmed),
+  and a request for the text of a voice message. There is no other server and no analytics.
 - **Sends to the conversation (and so to the model):** when you press **Summary**, the pane submits a prompt (`$.prompt.submit`)
-  that tells Claude to run `tgunread.py` and retell the result (for a channel or a group that script also marks it read; private chats are never marked read by a summary). The unread posts of that folder or chat then become part of the
+  that tells Claude to run `tgunread.py` and retell the result (the *unread* choice for a channel or a group also marks it read; *day / week / month* never marks anything; private chats have no summary). The unread posts of that folder or chat then become part of the
   Claude Code conversation and go to the model like any other text there. Press nothing, and nothing is passed on.
 - **Hooks:** `session.start` registers the `/tg-pane` command and starts timers that run only while the pane is open;
   `command.run` for `tg-pane` opens the pane; `session.end` / `classic.SessionStart` / `ui.close` reopen or close it after `/clear`;

@@ -6,6 +6,8 @@ tgunread.py --private ["<folder>"] — unread private chats (of the folder, or e
 --mark-only — only mark them read, print nothing but the count.
 Private chats are never marked read here (the other person would see "read"): a private chat (id > 0), the folder
 in env TG_PANE_PRIVATE or "--private" — read and printed only. In other folders private chats are only named.
+--since day|week|month — not the unread but everything posted in that period (per chat at most 150 posts, 15 chats, texts cut);
+marks NOTHING read, private chats are not opened (for a person's chat with --peer it is read only).
 Pauses between chats — do not hammer Telegram. Updates the folder's counters in the cache at the end."""
 import os, sys, time
 from tglib import ALL, page, api_chat, api_folders, api_mark_read, load_cache, save_cache
@@ -14,6 +16,10 @@ args = [a for a in sys.argv[1:] if not a.startswith("--")]
 opt = lambda k, d: sys.argv[sys.argv.index(k) + 1] if k in sys.argv else d
 max_chats, per_chat = int(opt("--max-chats", 15)), int(opt("--per-chat", 40))
 peer, mark_only = opt("--peer", None), "--mark-only" in sys.argv
+since = opt("--since", None)
+if since not in (None, "day", "week", "month"):
+    sys.exit("--since takes day, week or month")
+args = [a for a in args if a != since]  # the word after --since is not a folder name
 if peer: args = []
 name = args[0] if args else None
 private_names = {"личные", "private", (os.environ.get("TG_PANE_PRIVATE") or "").lower()} - {""}
@@ -23,7 +29,50 @@ if private and mark_only:
 if private and not peer and not name:
     name = ALL
 
+PERIOD_CHATS, PERIOD_POSTS, PERIOD_CHARS, PERIOD_TOTAL = 15, 150, 600, 60000
+
+
+def period(pg, todo, name, days):
+    """Print everything the chats posted in the last `days` days; reads only, nothing is marked read."""
+    cutoff = time.time() - days * 86400
+    print(f"# {name}: posts of the last {since} ({len(todo)} chats, at most {PERIOD_POSTS} posts each, nothing marked read)")
+    total = 0
+    for c in todo:
+        got, before = [], 0
+        while len(got) < PERIOD_POSTS:
+            h = api_chat(pg, c["id"], 50, before)
+            page_ = h["messages"]
+            if not page_: break
+            got = [m for m in page_ if m["ts"] >= cutoff] + got
+            before = page_[0]["mid"]
+            if page_[0]["ts"] < cutoff: break
+            pg.wait_for_timeout(600)
+        got = got[-PERIOD_POSTS:]
+        if not got: continue
+        print(f"\n## {c['title']} (posts {len(got)})")
+        for m in got:
+            who = "me: " if m["out"] and h["kind"] != "channel" else f"{m['from']}: " if m.get("from") else ""
+            line = f"{m['date']} {m['time']} {who}{m['text'][:PERIOD_CHARS]!r}"
+            total += len(line)
+            if total > PERIOD_TOTAL: print("# ...output cut: too long"); return
+            print(line)
+        pg.wait_for_timeout(1000)
+
+
 with page() as pg:
+    if since:
+        days = {"day": 1, "week": 7, "month": 30}[since]
+        if peer:
+            h = api_chat(pg, peer, 1)
+            period(pg, [{"id": peer, "title": h["title"]}], f"«{h['title']}»", days)
+        else:
+            rows = api_folders(pg, [name or ALL]).get(name or ALL)
+            if rows is None:
+                sys.exit(f"folder «{name}» not found")
+            cutoff = time.time() - days * 86400
+            todo = sorted([c for c in rows if c["id"].startswith("-") and c["ts"] >= cutoff], key=lambda c: -c["ts"])[:PERIOD_CHATS]
+            period(pg, todo, name or ALL, days)
+        sys.exit(0)
     if peer:
         h = api_chat(pg, peer, 1)
         todo, people = [{"id": peer, "title": h["title"], "unread": h["unread"]}], []

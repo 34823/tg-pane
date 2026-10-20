@@ -1,12 +1,21 @@
 {
   "name": "tg-pane",
-  "version": "0.4.0",
-  "description": "Telegram in a Claude Code pane: private chats with replies, categories (all chats and folders), model summaries of unread posts",
-  "author": { "name": "34823" },
+  "version": "0.5.0",
+  "description": "Telegram in a Claude Code pane: private chats with replies, search, message actions (reply, edit, delete, react, forward), voice transcripts, categories (all chats and folders), model summaries of channels",
+  "author": {
+    "name": "34823"
+  },
   "homepage": "https://github.com/34823/tg-pane",
   "repository": "https://github.com/34823/tg-pane",
   "license": "MIT",
-  "keywords": ["telegram", "claude-code", "pane", "tui", "summary", "function-hooks"],
+  "keywords": [
+    "telegram",
+    "claude-code",
+    "pane",
+    "tui",
+    "summary",
+    "function-hooks"
+  ],
   "types": "./types/index.d.ts",
   "userConfig": {
     "python": {
@@ -32,7 +41,10 @@
       "title": "Language",
       "description": "The pane's language and the language of summaries.",
       "default": "en",
-      "options": ["en", "ru"]
+      "options": [
+        "en",
+        "ru"
+      ]
     },
     "autoReadChannels": {
       "type": "boolean",

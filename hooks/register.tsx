@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Cache, CachedChat, History, Kind, Login, Message, Tab, Viewer } from '../types'
+import type { Cache, CachedChat, Forward, Found, History, Hit, Kind, ListSearch, Login, Message, Mode, Tab, Viewer } from '../types'
 
 // Telegram in a pane. The data comes from the backend/ scripts, which drive a logged-in Telegram Web in a headless
 // Chromium through its own internal API. Counters are read from the cache file the scripts write; the browser is
@@ -24,8 +24,8 @@ const T = {
     noCache: 'no counters yet — press «Refresh»', loading: 'loading…', marking: 'marking read…', sending: 'sending…',
     ok: 'all good', sent: 'sent', notSent: 'NOT sent', failed: 'failed', counts: 'counters', updating: 'updating counters…',
     flood: 'Telegram asks to slow down — pausing for 10 min', restarting: 'starting the Telegram browser…',
-    paused: 'auto-refresh paused — press «Refresh»', pickChat: 'Pick a chat on the left. The other person sees «read» only after you reply or press «Mark read».',
-    pickFirst: 'Pick a chat first', read: (n: number) => `Mark read (${n})`, summary: 'Summary', readAll: 'Mark all read',
+    paused: 'auto-refresh paused — press «Refresh»', pickChat: 'Pick a chat on the left. The other person sees «read» only after you reply.',
+    pickFirst: 'Pick a chat first', summary: 'Summary', readAll: 'Mark all read',
     folders: '← Folders', chats: '← Chats', allRead: 'all read', unread: 'unread', older: '▲ older', newer: '▼ newer', theme: 'theme', openMedia: (k: string) => `▣ ${k} · open`, mediaKind: { photo: 'photo', image: 'image', video: 'video (preview)', file: 'file' } as Record<string, string>,
     mediaLoading: 'downloading the picture…', mediaFail: 'could not get the picture', nothingYet: 'No messages yet', pick: 'pick a chat',
     me: 'me', placeholder: 'message, Enter to send', send: 'send', terminalOnly: 'Writing — from the terminal',
@@ -42,12 +42,17 @@ const T = {
     digestChat: (t: string, cmd: string) =>
       `Summarize the Telegram channel «${t}»: run \`${cmd}\` (it prints its unread posts, at least the last 10, and marks them read) ` +
       `and retell them, most important first, 1–2 lines per post or topic.`,
-    digestPrivate: (f: string, cmd: string) =>
-      `Summarize my unread private Telegram chats (${f}): run \`${cmd}\` (it prints their unread messages and does NOT ` +
-      `mark them read — the people will not see «read») and retell them by chat, who wants what, most urgent first, 1–2 lines per chat.`,
-    digestPerson: (t: string, cmd: string) =>
-      `Summarize my Telegram chat with «${t}»: run \`${cmd}\` (it prints the unread messages, at least the last 10, and does NOT ` +
-      `mark them read) and retell it: what they wrote, what they want from me, 1–3 lines.`,
+    searchList: 'search chats and messages', searchChat: 'search in this chat', found: (n: number) => `found: ${n}`, nothingFound: 'nothing found', searching: 'searching…',
+    chatsHead: 'chats', hitsHead: 'messages', clear: 'clear',
+    reply: '↩ reply', edit: '✎ edit', del: '⌫ delete', react: '☺ react', forward: '↪ forward', cancel: '✕',
+    replying: (q: string) => `↪ reply: «${q}»`, editing: '✎ editing the message', confirmDel: 'Delete for everyone?', yes: 'yes', no: 'no',
+    fwdTitle: 'Forward to…', fwdFilter: 'filter chats, Enter', fwdAsk: (n: string) => `Forward to «${n}»?`, fwdNone: 'no such chat',
+    unreadWord: 'unread', day: 'day', week: 'week', month: 'month', toNew: '⤓ latest',
+    transcribe: (k: string) => (k === 'round' ? '◉ video note · transcribe' : '♪ voice · transcribe'), transcribing: 'transcribing…', trFailed: 'could not transcribe (Telegram Premium needed)',
+    done: 'done', working: 'working…', forwarded: '↪ forwarded',
+    digestSince: (t: string, cmd: string, label: string) =>
+      `Summarize the Telegram «${t}» for the period «${label}»: run \`${cmd}\` (it prints the posts of that period and marks NOTHING read) ` +
+      `and retell them by topic, most important first, 1–2 lines per topic; name the channels at the end.`,
     tzAsk: 'Your time zone? Message times are shown in it.', tzOther: 'or type a name like Europe/Berlin, Enter',
     tzBad: (z: string) => `«${z}» is not a time zone`,
   },
@@ -56,8 +61,8 @@ const T = {
     noCache: 'нет кэша счётчиков — нажми «Обновить»', loading: 'загружаю…', marking: 'помечаю прочитанным…', sending: 'отправляю…',
     ok: 'всё в порядке', sent: 'отправлено', notSent: 'НЕ отправлено', failed: 'ошибка', counts: 'счётчики', updating: 'обновляю счётчики…',
     flood: 'Telegram просит притормозить — пауза 10 мин', restarting: 'запускаю браузер Telegram…',
-    paused: 'автообновление на паузе — нажми «Обновить»', pickChat: 'Выбери чат слева. Собеседник увидит «прочитано», только когда ответишь или нажмёшь «Прочитать».',
-    pickFirst: 'Сначала выбери чат', read: (n: number) => `Прочитать (${n})`, summary: 'Сводка', readAll: 'Прочитать всё',
+    paused: 'автообновление на паузе — нажми «Обновить»', pickChat: 'Выбери чат слева. Собеседник увидит «прочитано», только когда ответишь.',
+    pickFirst: 'Сначала выбери чат', summary: 'Сводка', readAll: 'Прочитать всё',
     folders: '← Папки', chats: '← Чаты', allRead: 'всё прочитано', unread: 'непрочит.', older: '▲ раньше', newer: '▼ позже', theme: 'тема', openMedia: (k: string) => `▣ ${k} · открыть`, mediaKind: { photo: 'фото', image: 'картинка', video: 'видео (превью)', file: 'файл' } as Record<string, string>,
     mediaLoading: 'скачиваю картинку…', mediaFail: 'не удалось получить картинку', nothingYet: 'Сообщений пока нет', pick: 'выбери чат',
     me: 'я', placeholder: 'сообщение, Enter — отправить', send: 'отправить', terminalOnly: 'Писать — из терминала',
@@ -74,17 +79,24 @@ const T = {
     digestChat: (t: string, cmd: string) =>
       `Сводка по Telegram-каналу «${t}»: запусти \`${cmd}\` (печатает непрочитанные посты, минимум 10 последних, и помечает прочитанными) ` +
       `и перескажи по-русски, главное сверху, 1–2 строки на пост или тему.`,
-    digestPrivate: (f: string, cmd: string) =>
-      `Сводка по моим непрочитанным личным чатам в Telegram (${f}): запусти \`${cmd}\` (печатает непрочитанные сообщения и НЕ ` +
-      `помечает их прочитанными — собеседники не увидят «прочитано») и перескажи по-русски по чатам: кто что хочет, срочное сверху, 1–2 строки на чат.`,
-    digestPerson: (t: string, cmd: string) =>
-      `Сводка по моему Telegram-чату с «${t}»: запусти \`${cmd}\` (печатает непрочитанные, минимум 10 последних, и НЕ ` +
-      `помечает прочитанными) и перескажи по-русски: что написали, что хотят от меня, 1–3 строки.`,
+    searchList: 'поиск по чатам и сообщениям', searchChat: 'поиск в этом чате', found: (n: number) => `найдено: ${n}`, nothingFound: 'ничего не найдено', searching: 'ищу…',
+    chatsHead: 'чаты', hitsHead: 'сообщения', clear: 'сбросить',
+    reply: '↩ ответ', edit: '✎ правка', del: '⌫ удалить', react: '☺ реакция', forward: '↪ переслать', cancel: '✕',
+    replying: (q: string) => `↪ ответ: «${q}»`, editing: '✎ правка сообщения', confirmDel: 'Удалить у всех?', yes: 'да', no: 'нет',
+    fwdTitle: 'Переслать в…', fwdFilter: 'фильтр чатов, Enter', fwdAsk: (n: string) => `Переслать в «${n}»?`, fwdNone: 'нет такого чата',
+    unreadWord: 'непрочит.', day: 'день', week: 'неделя', month: 'месяц', toNew: '⤓ к новым',
+    transcribe: (k: string) => (k === 'round' ? '◉ кружок · расшифровать' : '♪ голосовое · расшифровать'), transcribing: 'расшифровываю…', trFailed: 'не удалось расшифровать (нужен Telegram Premium)',
+    done: 'готово', working: 'делаю…', forwarded: '↪ переслано',
+    digestSince: (t: string, cmd: string, label: string) =>
+      `Сводка по Telegram «${t}» за период «${label}»: запусти \`${cmd}\` (печатает посты за этот период и НИЧЕГО не помечает прочитанным) ` +
+      `и перескажи по-русски по темам, главное сверху, 1–2 строки на тему; в конце — какие каналы были.`,
     tzAsk: 'Твой часовой пояс? В нём показывается время сообщений.', tzOther: 'или впиши название, например Europe/Berlin, Enter',
     tzBad: (z: string) => `«${z}» — не часовой пояс`,
   },
 }
 type Strings = (typeof T)['en']
+type Period = 'day' | 'week' | 'month'
+const PERIODS: Period[] = ['day', 'week', 'month']
 
 const tab = atom({ plugin: 'tg-pane', key: 'tab' } as const, 'private' as Tab)
 const cache = atom({ plugin: 'tg-pane', key: 'cache' } as const, null as Cache | null)
@@ -99,6 +111,15 @@ const login = atom({ plugin: 'tg-pane', key: 'login' } as const, null as Login |
 const note = atom({ plugin: 'tg-pane', key: 'note' } as const, '')
 const draft = atom({ plugin: 'tg-pane', key: 'draft' } as const, 0)
 const askZone = atom({ plugin: 'tg-pane', key: 'askZone' } as const, false) // no time zone known: ask first
+const sel = atom({ plugin: 'tg-pane', key: 'sel' } as const, null as number | null) // the message picked with one press: its actions are in the chat's top row
+const mode = atom({ plugin: 'tg-pane', key: 'mode' } as const, null as Mode | null) // the input answers a message (two presses) or rewrites mine
+const toolbar = atom({ plugin: 'tg-pane', key: 'toolbar' } as const, '' as '' | 'react' | 'delete') // the top row asks which reaction / «delete?»
+const fwd = atom({ plugin: 'tg-pane', key: 'fwd' } as const, null as Forward | null) // choosing where to forward
+const found = atom({ plugin: 'tg-pane', key: 'found' } as const, null as Found | null) // search inside the open chat
+const jump = atom({ plugin: 'tg-pane', key: 'jump' } as const, null as number | null) // a window around a found message is shown (not the newest ones)
+const listQ = atom({ plugin: 'tg-pane', key: 'listQ' } as const, null as ListSearch | null) // search above the chat list
+const sumMenu = atom({ plugin: 'tg-pane', key: 'sumMenu' } as const, null as string | null) // which «Summary» shows its period choices
+const trs = atom({ plugin: 'tg-pane', key: 'trs' } as const, {} as Record<string, string>) // transcripts of voice messages, by «peer:mid»
 
 // Live until the module reloads: is the pane open, when the person last did something, is a request running,
 // was another load asked for meanwhile, does the chat wait to be marked read, the FLOOD_WAIT pause, the last restart.
@@ -107,6 +128,7 @@ let lastActive = 0
 let isFetching = false
 let fetchAgain = false
 let readWanted = false
+let replaceWanted = false // the next load replaces the shown messages instead of joining them (back from a found message to the newest)
 let floodUntil = 0
 let restartedAt = -Infinity
 
@@ -184,21 +206,37 @@ export function wrapLines(text: string, width: number) {
   return out
 }
 
-type Row = { key: string; text: string; time?: string; out?: boolean; isDate?: boolean; sender?: string; head?: boolean; media?: { mid: number; kind: string } }
+type Row = {
+  key: string; text: string; mid?: number; time?: string; out?: boolean; isDate?: boolean; sender?: string; head?: boolean
+  line?: boolean // a line of the message's own text: a press on it picks the message
+  meta?: boolean // a quiet row of a message: what it answers, forwarded, reactions, a transcript
+  edited?: boolean; media?: { mid: number; kind: string }; trans?: { mid: number; kind: string }
+}
 
-// Every message as rows (one per line, whole text, nothing cut), with a date row where the day changes and a row
-// with the «open» button under a picture. `names` undefined — a channel; otherwise a name row opens each run of one sender's messages (in a group the sender is `from`, in a private chat `them`).
-export function layoutMessages(messages: Message[], width: number, openLabel: (kind: string) => string = k => k, names?: { me: string; them?: string }) {
+// Every message as rows (one per line, whole text, nothing cut), with a date row where the day changes, rows for what it
+// answers / who it came from / reactions, a row with the «open» button under a picture and the «transcribe» button (or the
+// transcript, `texts[mid]`; '…' while it is being made) under a voice message or a round video.
+// `names` undefined — a channel; otherwise a name row opens each run of one sender's messages (in a group the sender is `from`, in a private chat `them`).
+export function layoutMessages(messages: Message[], width: number, openLabel: (kind: string) => string = k => k, names?: { me: string; them?: string },
+  texts: Record<number, string> = {}, fwdLabel: (from: string | true) => string = f => `↪ ${f === true ? '' : f}`) {
   const out: Row[] = []
   messages.forEach((m, i) => {
     if (m.date && m.date !== messages[i - 1]?.date) out.push({ key: `d${m.mid}`, text: m.date, isDate: true })
     const body = m.text.replace(/^\[media\] ?/, '')
     const sender = !names ? undefined : m.out ? names.me : m.from ?? names.them
     const prev = messages[i - 1]
-    if (sender && (!prev || sender !== (prev.out ? names!.me : prev.from ?? names!.them) || m.date !== prev.date)) out.push({ key: `h${m.mid}`, text: sender, head: true, sender, out: m.out })
-    const lines = wrapLines(body, width)
-    lines.forEach((text, j) => out.push({ key: `m${m.mid}-${j}`, text, time: j === 0 ? m.time : undefined, out: m.out, sender }))
-    if (m.media && m.media !== 'file') out.push({ key: `o${m.mid}`, text: openLabel(m.media), out: m.out, media: { mid: m.mid, kind: m.media } })
+    if (sender && (!prev || sender !== (prev.out ? names!.me : prev.from ?? names!.them) || m.date !== prev.date)) out.push({ key: `h${m.mid}`, text: sender, head: true, mid: m.mid, sender, out: m.out })
+    const quiet = (key: string, text: string) => out.push({ key: `${key}${m.mid}`, text, mid: m.mid, meta: true, out: m.out, sender })
+    if (m.reply) quiet('q', `↩ ${m.reply.text || '…'}`)
+    if (m.fwd) quiet('f', fwdLabel(m.fwd))
+    wrapLines(body, width).forEach((text, j) => out.push({ key: `m${m.mid}-${j}`, text, mid: m.mid, line: true, time: j === 0 ? m.time : undefined, edited: j === 0 && !!m.edited, out: m.out, sender }))
+    if (m.media === 'voice' || m.media === 'round') {
+      const tx = texts[m.mid]
+      if (tx === undefined) out.push({ key: `o${m.mid}`, text: openLabel(m.media), mid: m.mid, out: m.out, sender, trans: { mid: m.mid, kind: m.media } })
+      else if (tx === '…') quiet('o', openLabel('busy'))
+      else wrapLines(`♪ ${tx}`, width).forEach((text, j) => out.push({ key: `o${m.mid}-${j}`, text, mid: m.mid, meta: true, out: m.out, sender }))
+    } else if (m.media && m.media !== 'file') out.push({ key: `o${m.mid}`, text: openLabel(m.media), mid: m.mid, out: m.out, sender, media: { mid: m.mid, kind: m.media } })
+    if (m.reactions?.length) quiet('r', m.reactions.map(r => (r.me ? `[${r.e} ${r.n}]` : `${r.e} ${r.n}`)).join('  '))
   })
   return out
 }
@@ -329,6 +367,7 @@ async function currentPeer($: EngineInterface) {
 // Older messages loaded with «▲» are kept.
 async function fetchChat($: EngineInterface) {
   if (isFetching) return void (fetchAgain = true)
+  if ((await read($, jump)) !== null && !replaceWanted) return // a window around a found message: the newest ones would tear a gap into it
   isFetching = true
   try {
     do {
@@ -336,14 +375,16 @@ async function fetchChat($: EngineInterface) {
       const peer = await currentPeer($)
       if (!peer) return
       const andRead = readWanted
+      const replace = replaceWanted
       readWanted = false
+      replaceWanted = false
       const r = await run($, 'tgchat.py', andRead ? [peer, String(PAGE), '--read'] : [peer, String(PAGE)])
       if (andRead) await loadCache($) // tgchat.py --read zeroed this chat's counter in the cache
       if ((await currentPeer($)) !== peer) continue // another chat was picked meanwhile — load that one
       if (r.exitCode !== 0) return void (await failed($, r, t.failed))
       const fresh = JSON.parse(r.stdout) as History
       await update($, chat, old => {
-        if (old?.peer !== peer || !fresh.messages.length) return fresh
+        if (replace || old?.peer !== peer || !fresh.messages.length) return fresh
         const first = fresh.messages[0]!.mid
         return { ...fresh, messages: [...old.messages.filter(m => m.mid < first), ...fresh.messages] }
       })
@@ -371,7 +412,13 @@ async function loadOlder($: EngineInterface) {
 }
 
 // What the last drawing showed, for the wheel and the keys: all rows of the open chat, the rows that fit, the left column.
-const view = { total: 0, fit: 0, leftWidth: 0, listLen: 0, listFit: 0 }
+const view = { total: 0, fit: 0, textW: 40, leftWidth: 0, listLen: 0, listFit: 0 }
+
+// The rows of a chat as the last drawing laid them out (the same call the drawing makes).
+function rowsOf(h: History | null, texts: Record<number, string>) {
+  return layoutMessages(h?.messages ?? [], view.textW, k => (k === 'busy' ? t.transcribing : k === 'voice' || k === 'round' ? t.transcribe(k) : t.openMedia(t.mediaKind[k] ?? k)),
+    h?.kind === 'channel' ? undefined : { me: t.me, them: h?.title }, texts, f => (f === true ? t.forwarded : `${t.forwarded} ${f}`))
+}
 
 // Moves the open chat's window by `step` rows (positive — toward older), at once; older messages load in the
 // background when the top is near, the view stays where it is.
@@ -382,6 +429,7 @@ async function scroll($: EngineInterface, step: number) {
   const to = Math.max(0, Math.min(max, now + step))
   if (to !== now) await update($, lift, () => to)
   if (step > 0 && max - to < 6) void loadOlder($)
+  if (step < 0 && to === 0) void loadNewer($) // the bottom of a window around a found message: the messages after it
 }
 
 async function setTheme($: EngineInterface, i?: number) {
@@ -417,7 +465,14 @@ async function openMedia($: EngineInterface, mid: number, cols: number) {
   await showPicture($, file, cols)
 }
 
-async function openChat($: EngineInterface, peer: string, andRead = false) {
+// Nothing picked, no search, no half-made reply: what belongs to the chat that was open.
+async function clearPick($: EngineInterface) {
+  if ((await read($, mode))?.kind === 'edit') await update($, draft, n => n + 1) // the field held the old text
+  await Promise.all([update($, sel, () => null), update($, mode, () => null), update($, toolbar, () => ''), update($, fwd, () => null),
+    update($, found, () => null), update($, jump, () => null), update($, sumMenu, () => null)])
+}
+
+async function openChat($: EngineInterface, peer: string, andRead = false, at = 0) {
   lastActive = await $.clock.now()
   readWanted = andRead
   if ((await read($, tab)) === 'private') await update($, selected, () => peer)
@@ -425,48 +480,300 @@ async function openChat($: EngineInterface, peer: string, andRead = false) {
   await update($, chat, () => null)
   await update($, lift, () => 0)
   await update($, note, () => t.loading)
+  await clearPick($)
   await remember($)
-  await fetchChat($)
+  if (at) await jumpTo($, at)
+  else await fetchChat($)
 }
 
 async function closeChat($: EngineInterface) {
   if ((await read($, tab)) === 'private') await update($, selected, () => null)
   else await update($, channel, () => null)
   await update($, chat, () => null)
+  await clearPick($)
   await remember($)
 }
 
-async function markRead($: EngineInterface) {
-  lastActive = await $.clock.now()
-  await update($, note, () => t.marking)
-  readWanted = true
-  await fetchChat($)
+let sendChain: Promise<unknown> = Promise.resolve() // everything that writes to Telegram goes out one by one, in the order pressed
+
+// A fresh, empty message field with the cursor in it: the next message can be typed while this one goes out.
+async function freshInput($: EngineInterface) {
+  const next = (await read($, draft)) + 1
+  await update($, draft, () => next)
+  await focusInput($)
 }
 
-let sendChain: Promise<unknown> = Promise.resolve() // messages go out one by one, in the order typed
+async function focusInput($: EngineInterface) {
+  const n = await read($, draft)
+  for (const wait of [0, 120, 400]) { // the field is drawn on the next render
+    if (wait) await new Promise(r => setTimeout(r, wait))
+    const f = await $.ui.focus({ requestId: PANE, key: `msg-${n}` }).catch(() => ({ deny: 'x' }))
+    if (!('deny' in f)) break
+  }
+}
+
+// One thing for Telegram to do (a message, an edit, a reaction…): queued behind the earlier ones, then the chat is read again.
+function queue($: EngineInterface, job: () => Promise<boolean>) {
+  sendChain = sendChain.then(async () => {
+    if (await job()) await fetchChat($)
+  })
+}
 
 async function send($: EngineInterface, text: string) {
   const peer = await currentPeer($)
   if (!text.trim()) return
   if (!peer) return void $.ui.toast(t.pickFirst)
   lastActive = await $.clock.now()
-  // A fresh, empty field at once, with the cursor in it: the next message can be typed while this one goes out.
-  const next = (await read($, draft)) + 1
-  await update($, draft, () => next)
+  const m = await read($, mode) // taken now: the next message may start another reply while this one is still going out
+  if (m?.kind === 'edit') return void (await editMessage($, peer, m.mid, text))
+  const replyTo = m?.kind === 'reply' ? m.mid : 0
+  await update($, mode, () => null)
+  await update($, sel, () => null)
   await update($, note, () => t.sending)
-  for (const wait of [0, 120, 400]) { // the field is drawn on the next render
-    if (wait) await new Promise(r => setTimeout(r, wait))
-    const f = await $.ui.focus({ requestId: PANE, key: `msg-${next}` }).catch(() => ({ deny: 'x' }))
-    if (!('deny' in f)) break
-  }
-  sendChain = sendChain.then(async () => {
-    const r = await run($, 'tgmsg.py', ['--peer', peer, text], 300_000)
-    if (r.exitCode !== 0) return void (await failed($, r, t.notSent))
+  await update($, draft, n => n + 1) // an empty field at once; the cursor goes into it once the message is queued
+  const back = (await read($, jump)) !== null // a window around a found message: after sending, the newest ones again
+  if (back) { await update($, jump, () => null); replaceWanted = true }
+  queue($, async () => {
+    const r = await run($, 'tgmsg.py', ['--peer', peer, ...(replyTo ? ['--reply', String(replyTo)] : []), text], 300_000)
+    if (r.exitCode !== 0) {
+      await failed($, r, t.notSent)
+      return false
+    }
     await update($, lift, () => 0)
     await update($, note, () => t.sent)
     await loadCache($) // replied = the chat is read, tgmsg zeroed its counter
-    await fetchChat($)
+    return true
   })
+  await focusInput($)
+}
+
+// ---- the message that was picked: one press picks it (actions in the top row), two presses make it the reply's target
+const DOUBLE_MS = 450
+let lastPress = { mid: 0, at: -Infinity }
+export function isDoublePress(last: { mid: number; at: number }, mid: number, now: number, gap = DOUBLE_MS) {
+  return last.mid === mid && now - last.at <= gap
+}
+
+const bare = (m: Message) => m.text.replace(/^\[media\] ?/, '')
+
+async function pickMessage($: EngineInterface, mid: number) {
+  const now = await $.clock.now()
+  lastActive = now
+  const dbl = isDoublePress(lastPress, mid, now)
+  lastPress = dbl ? { mid: 0, at: -Infinity } : { mid, at: now }
+  if (dbl) return void (await startReply($, mid))
+  const [cur, md] = await Promise.all([read($, sel), read($, mode)])
+  if (md) {
+    await update($, mode, () => null)
+    if (md.kind === 'edit') await update($, draft, n => n + 1)
+  }
+  await update($, toolbar, () => '')
+  await update($, sel, () => (cur === mid && !md ? null : mid)) // pressing the picked one again lets it go
+}
+
+async function startReply($: EngineInterface, mid: number) {
+  const h = await read($, chat)
+  const m = h?.messages.find(x => x.mid === mid)
+  if (!m || h?.kind === 'channel') return // a channel: nothing to write
+  const quote = (bare(m) || m.media || '…').replace(/\s+/g, ' ').slice(0, 60)
+  await update($, mode, () => ({ kind: 'reply', mid, text: quote }))
+  await update($, sel, () => mid)
+  await update($, toolbar, () => '')
+  await focusInput($)
+}
+
+async function startEdit($: EngineInterface, mid: number) {
+  const m = (await read($, chat))?.messages.find(x => x.mid === mid)
+  if (!m?.out) return
+  await update($, mode, () => ({ kind: 'edit', mid, text: bare(m) }))
+  await update($, toolbar, () => '')
+  await freshInput($) // a new field that holds the text
+}
+
+async function cancelMode($: EngineInterface) {
+  const md = await read($, mode)
+  await update($, mode, () => null)
+  await update($, sel, () => null)
+  if (md?.kind === 'edit') await update($, draft, n => n + 1)
+}
+
+const patchMessage = (mid: number, fn: (m: Message) => Message | null) => (old: History | null) =>
+  old ? { ...old, messages: old.messages.flatMap(m => (m.mid === mid ? fn(m) ?? [] : [m])) } : old
+
+async function editMessage($: EngineInterface, peer: string, mid: number, text: string) {
+  await update($, mode, () => null)
+  await update($, sel, () => null)
+  await update($, note, () => t.working)
+  await update($, draft, n => n + 1)
+  queue($, async () => {
+    const r = await run($, 'tgact.py', ['edit', peer, String(mid), text], 120_000)
+    if (r.exitCode !== 0) {
+      await failed($, r, t.failed)
+      return false
+    }
+    await update($, chat, patchMessage(mid, m => ({ ...m, text: (m.media ? '[media] ' : '') + text, edited: true })))
+    await update($, note, () => t.done)
+    return false
+  })
+}
+
+async function deleteMessage($: EngineInterface, mid: number) {
+  const peer = await currentPeer($)
+  if (!peer) return
+  await update($, toolbar, () => '')
+  await update($, sel, () => null)
+  await update($, note, () => t.working)
+  queue($, async () => {
+    const r = await run($, 'tgact.py', ['delete', peer, String(mid)], 120_000)
+    if (r.exitCode !== 0) {
+      await failed($, r, t.failed)
+      return false
+    }
+    await update($, chat, patchMessage(mid, () => null))
+    await update($, note, () => t.done)
+    return false
+  })
+}
+
+async function reactTo($: EngineInterface, mid: number, emoji: string) {
+  const peer = await currentPeer($)
+  if (!peer) return
+  await update($, toolbar, () => '')
+  await update($, sel, () => null)
+  await update($, note, () => t.working)
+  queue($, async () => {
+    const r = await run($, 'tgact.py', ['react', peer, String(mid), emoji], 120_000)
+    if (r.exitCode !== 0) {
+      await failed($, r, t.failed)
+      return false
+    }
+    await update($, note, () => t.done)
+    return true // read the chat again: the reaction is under the message
+  })
+}
+
+async function startForward($: EngineInterface, mid: number) {
+  await update($, toolbar, () => '')
+  await update($, fwd, () => ({ mid, q: '', to: null }))
+}
+
+async function forwardTo($: EngineInterface, to: string) {
+  const f = await read($, fwd)
+  const peer = await currentPeer($)
+  if (!f || !peer) return
+  await update($, fwd, () => null)
+  await update($, sel, () => null)
+  await update($, note, () => t.working)
+  queue($, async () => {
+    const r = await run($, 'tgact.py', ['forward', peer, String(f.mid), to], 120_000)
+    if (r.exitCode !== 0) {
+      await failed($, r, t.failed)
+      return false
+    }
+    await update($, note, () => t.done)
+    return to === peer // forwarded into this very chat: it shows up here
+  })
+}
+
+// Telegram Premium's text of a voice message or a round video, on request; kept until the pane reloads.
+async function transcribe($: EngineInterface, mid: number) {
+  lastActive = await $.clock.now()
+  const peer = await currentPeer($)
+  if (!peer) return
+  const key = `${peer}:${mid}`
+  await update($, trs, old => ({ ...old, [key]: '…' }))
+  const r = await run($, 'tgact.py', ['transcribe', peer, String(mid)], 180_000)
+  if (r.exitCode !== 0) {
+    await update($, trs, old => Object.fromEntries(Object.entries(old).filter(([k]) => k !== key)))
+    return void (await update($, note, () => `${t.trFailed}: ${r.stderr.trim().slice(-80)}`))
+  }
+  await update($, trs, old => ({ ...old, [key]: r.stdout.trim() || '…' }))
+}
+
+// ---- search inside the open chat
+async function openSearch($: EngineInterface) {
+  await update($, toolbar, () => '')
+  await update($, sel, () => null)
+  await update($, found, () => ({ q: '', hits: null }))
+}
+
+async function runSearch($: EngineInterface, q: string) {
+  lastActive = await $.clock.now()
+  const peer = await currentPeer($)
+  if (!peer) return
+  q = q.trim()
+  if (!q) return void (await update($, found, () => ({ q: '', hits: null })))
+  await update($, found, () => ({ q, hits: null }))
+  await update($, note, () => t.searching)
+  const r = await run($, 'tgchat.py', [peer, '30', '--query', q])
+  if (r.exitCode !== 0) return void (await failed($, r, t.failed))
+  const hits = (JSON.parse(r.stdout) as History).messages.reverse() // newest first
+  await update($, found, old => (old?.q === q ? { q, hits } : old))
+  await update($, note, () => '')
+}
+
+// A window around message `mid` (a search hit), the message highlighted and in the middle of the view.
+async function jumpTo($: EngineInterface, mid: number) {
+  lastActive = await $.clock.now()
+  const peer = await currentPeer($)
+  if (!peer) return
+  await update($, note, () => t.loading)
+  const r = await run($, 'tgchat.py', [peer, String(PAGE), '--around', String(mid)])
+  if (r.exitCode !== 0) return void (await failed($, r, t.failed))
+  if ((await currentPeer($)) !== peer) return // another chat was picked meanwhile
+  const fresh = JSON.parse(r.stdout) as History
+  await update($, chat, () => fresh)
+  await update($, jump, () => mid)
+  await update($, found, () => null)
+  await update($, sel, () => null)
+  const rows = rowsOf(fresh, {})
+  const at = rows.findIndex(x => x.mid === mid && x.line)
+  const end = at < 0 ? rows.length : Math.min(rows.length, at + 1 + Math.floor(view.fit / 2))
+  await update($, lift, () => Math.max(0, Math.min(rows.length - end, rows.length - view.fit)))
+  await update($, note, () => '')
+}
+
+// Back from a window around a found message to the newest ones.
+async function toNewest($: EngineInterface) {
+  await update($, jump, () => null)
+  await update($, lift, () => 0)
+  replaceWanted = true
+  await fetchChat($)
+}
+
+async function loadNewer($: EngineInterface) {
+  const h = await read($, chat)
+  const peer = await currentPeer($)
+  if (!h || h.peer !== peer || !h.messages.length || isFetching || (await read($, jump)) === null) return
+  isFetching = true
+  let atEnd = false
+  try {
+    const last = h.messages.at(-1)!.mid
+    const r = await run($, 'tgchat.py', [peer!, String(PAGE), '--after', String(last)])
+    if (r.exitCode !== 0) return void (await failed($, r, t.failed))
+    const newer = (JSON.parse(r.stdout) as History).messages.filter(m => m.mid > last)
+    atEnd = newer.length < PAGE - 2
+    await update($, chat, old => (old?.peer === peer ? { ...old, messages: [...old.messages, ...newer.filter(m => m.mid > old.messages.at(-1)!.mid)] } : old))
+  } finally {
+    isFetching = false
+  }
+  if (atEnd) { await update($, jump, () => null); await fetchChat($) } // reached the newest: live again
+}
+
+// ---- search above the chat list: chat names at once, message texts from Telegram
+async function runListSearch($: EngineInterface, q: string) {
+  lastActive = await $.clock.now()
+  q = q.trim()
+  if (!q) return void (await update($, listQ, () => null))
+  await update($, listQ, () => ({ q, hits: null }))
+  await update($, listTop, () => 0)
+  if (q.length < 2) return
+  await update($, note, () => t.searching)
+  const r = await run($, 'tgsearch.py', [q, '15'])
+  if (r.exitCode !== 0) return void (await failed($, r, t.failed))
+  const hits = (JSON.parse(r.stdout) as { hits: Hit[] }).hits
+  await update($, listQ, old => (old?.q === q ? { q, hits } : old))
+  await update($, note, () => '')
 }
 
 async function refresh($: EngineInterface) {
@@ -495,7 +802,9 @@ async function switchTab($: EngineInterface, to: Tab) {
   await update($, chat, () => null)
   await update($, lift, () => 0)
   await update($, listTop, () => 0)
+  await update($, listQ, () => null)
   await update($, note, () => '')
+  await clearPick($)
   await remember($)
   if (await currentPeer($)) await fetchChat($)
 }
@@ -506,31 +815,38 @@ async function openFolder($: EngineInterface, f: string | null) {
   await update($, channel, () => null)
   await update($, chat, () => null)
   await update($, listTop, () => 0)
+  await update($, listQ, () => null)
+  await clearPick($)
   await remember($)
 }
 
 async function digest($: EngineInterface, f: string, title: string) {
   lastActive = await $.clock.now()
+  await update($, sumMenu, () => null)
   await $.prompt.submit({ text: t.digestFolder(title, command($, `tgunread.py "${f}"`)) })
   $.ui.toast(t.asked(title))
 }
 
-// A chat's summary. A person's chat, or any chat on «Private», is read without marking it read.
+// A channel's or group's summary of the unread posts (it marks them read, as opening a channel does).
 async function digestChat($: EngineInterface, peer: string, title: string) {
   lastActive = await $.clock.now()
-  const isPrivate = (await read($, tab)) === 'private' || !peer.startsWith('-')
-  const text = isPrivate ? t.digestPerson(title, command($, `tgunread.py --peer ${peer} --private`))
-    : t.digestChat(title, command($, `tgunread.py --peer ${peer}`))
-  await $.prompt.submit({ text })
+  await update($, sumMenu, () => null)
+  await $.prompt.submit({ text: t.digestChat(title, command($, `tgunread.py --peer ${peer}`)) })
   $.ui.toast(t.asked(title))
 }
 
-// Unread private chats: the private folder, or every chat with a person. Nothing is marked read.
-async function digestPrivate($: EngineInterface) {
+// Everything a folder or a chat posted in the last day / week / month; marks nothing read.
+async function digestPeriod($: EngineInterface, target: { folder?: string; peer?: string }, title: string, period: Period) {
   lastActive = await $.clock.now()
-  const f = opt.privateFolder
-  await $.prompt.submit({ text: t.digestPrivate(f || t.private, command($, f ? `tgunread.py "${f}"` : 'tgunread.py --private')) })
-  $.ui.toast(t.asked(f || t.private))
+  await update($, sumMenu, () => null)
+  const cmd = target.peer ? `tgunread.py --peer ${target.peer} --since ${period}` : `tgunread.py "${target.folder}" --since ${period}`
+  await $.prompt.submit({ text: t.digestSince(title, command($, cmd), t[period]) })
+  $.ui.toast(t.asked(title))
+}
+
+async function toggleMenu($: EngineInterface, key: string) {
+  lastActive = await $.clock.now()
+  await update($, sumMenu, old => (old === key ? null : key))
 }
 
 async function readAll($: EngineInterface, f: string, title: string) {
@@ -643,11 +959,12 @@ export const register: Register = (on, options) => {
 
   // The wheel and the keys move the open chat's own window (rows of text), the header and the input stay put.
   on('ui.scroll', { component: 'Pane', requestId: PANE }, async ($, e, next) => {
-    if (!(await currentPeer($)) || (await read($, login))) return next(e)
-    if (e.pointer && e.pointer.column < view.leftWidth && view.listLen > view.listFit) { // over the chat list
+    if (await read($, login)) return next(e)
+    if (e.pointer && e.pointer.column < view.leftWidth && view.listLen > view.listFit) { // over the chat list (also with no chat open)
       await update($, listTop, top => Math.max(0, Math.min(view.listLen - view.listFit, top + e.by)))
       return {}
     }
+    if (!(await currentPeer($))) return next(e)
     await scroll($, -e.by)
     return {}
   }).catch(($, e, next) => next(e))
@@ -676,7 +993,6 @@ export const register: Register = (on, options) => {
             onPress={() => void switchTab($, 'private')}>{`${t.private} ${priv ? sum(priv) : '?'}`}</Button>
           <Button key="tab-channels" hotkey="2" variant={current === 'channels' ? 'primary' : undefined}
             onPress={() => void switchTab($, 'channels')}>{`${t.channels} ${chanUnread}`}</Button>
-          {current === 'private' && priv && sum(priv) > 0 && <Button key="digest-private" onPress={() => void digestPrivate($)}>{t.summary}</Button>}
         </Box>
         <Box flexDirection="row" gap={1}>
           <Button key="refresh" plain onPress={() => void refresh($)}>{`↻ ${hhmm(data.updated)}`}</Button>
@@ -741,6 +1057,19 @@ export const register: Register = (on, options) => {
     const right = narrow ? cols : cols - left - 1
     const openFolderName = current === 'channels' ? await read($, folder) : null
 
+    // The summary's choices, in place of its button: unread, or what was posted in the last day / week / month.
+    const summaryMenu = (key: string, onUnread: () => void, onPeriod: (p: Period) => void) => (
+      <Box flexDirection="row" gap={1}>
+        <Button key={`sum-unread-${key}`} onPress={onUnread}>{t.unreadWord}</Button>
+        {PERIODS.map(p => <Button key={`sum-${p}-${key}`} onPress={() => onPeriod(p)}>{t[p]}</Button>)}
+        <Button key={`sum-x-${key}`} plain onPress={() => void toggleMenu($, key)}>{t.cancel}</Button>
+      </Box>
+    )
+    const summaryButton = (key: string, open: string | null, onUnread: () => void, onPeriod: (p: Period) => void) =>
+      open === key ? summaryMenu(key, onUnread, onPeriod)
+        : <Button key={`digest-${key}`} onPress={() => void toggleMenu($, key)}>{`${t.summary} ▾`}</Button>
+    const menuOpen = await read($, sumMenu)
+
     // Channels: the folders, each with its unread count, a preview and «Summary».
     if (current === 'channels' && openFolderName === null) {
       const rows = Math.max(6, bodyRows - 4)
@@ -756,11 +1085,11 @@ export const register: Register = (on, options) => {
               const top = chats.filter(c => c.unread > 0).sort((a, b) => b.unread - a.unread)
               return (
                 <Box key={`row-${f}`} flexDirection="column">
-                  <Box flexDirection="row" gap={1}>
+                  <Box flexDirection="row" gap={1} flexWrap="wrap">
                     <Button key={`folder-${f}`} plain onPress={() => void openFolder($, f)}>
                       {`▸ ${folderTitle(f)} — ${n} ${t.unread}`}
                     </Button>
-                    {n > 0 && <Button key={`digest-${f}`} onPress={() => void digest($, f, folderTitle(f))}>{t.summary}</Button>}
+                    {summaryButton(`f:${f}`, menuOpen, () => void digest($, f, folderTitle(f)), p => void digestPeriod($, { folder: f }, folderTitle(f), p))}
                   </Box>
                   {withPreview && (
                     <Text dimColor wrap="truncate-end">
@@ -778,21 +1107,21 @@ export const register: Register = (on, options) => {
 
     // A chat list beside (or, narrow, instead of) the open chat.
     const listed = current === 'private' ? priv ?? [] : folderChats(data, openFolderName!)
-    const [peer, history, top, hidden] = await Promise.all([currentPeer($), read($, chat), read($, listTop), read($, lift)])
+    const [peer, history, top, hidden, picked, md, tool, fw, fnd, jumpMid, lq, trAll] = await Promise.all([currentPeer($), read($, chat), read($, listTop), read($, lift),
+      read($, sel), read($, mode), read($, toolbar), read($, fwd), read($, found), read($, jump), read($, listQ), read($, trs)])
     const shown = history?.peer === peer ? history : null
     const cached = listed.find(c => c.id === peer)
     const kind: Kind | undefined = shown?.kind ?? cached?.kind
     const title = shown?.title ?? cached?.title
-    const unread = cached?.unread ?? shown?.unread ?? 0
-    const isChannel = kind === 'channel' || (!kind && !!peer?.startsWith('-') && current === 'channels')
     const writable = !!peer && kind !== 'channel'
     const n = await read($, draft)
+    const pickedMsg = picked !== null ? shown?.messages.find(m => m.mid === picked) : undefined // gone from the window (deleted, scrolled out) — nothing is picked
 
     const folderBar = current === 'channels' && (
       <Box flexDirection="row" gap={1} marginTop={1}>
         <Button key="folders" onPress={() => void openFolder($, null)}>{t.folders}</Button>
         <Text bold color={pal.accent}>{`${folderTitle(openFolderName!)} ${sum(listed)}`}</Text>
-        {sum(listed) > 0 && <Button key={`digest-${openFolderName}`} onPress={() => void digest($, openFolderName!, folderTitle(openFolderName!))}>{t.summary}</Button>}
+        {summaryButton(`f:${openFolderName}`, menuOpen, () => void digest($, openFolderName!, folderTitle(openFolderName!)), p => void digestPeriod($, { folder: openFolderName! }, folderTitle(openFolderName!), p))}
         {sum(listed) > 0 && <Button key="readall" onPress={() => void readAll($, openFolderName!, folderTitle(openFolderName!))}>{t.readAll}</Button>}
       </Box>
     )
@@ -802,29 +1131,47 @@ export const register: Register = (on, options) => {
     // Room for three lines of typed text: the field wraps by itself, and a redraw while typing takes the cursor away.
     const inputRows = writable ? 5 : 0
     const boxH = Math.max(7, bodyRows - 2 - (folderBar ? 2 : 0) - inputRows) // the status is under the time, the input is at the very bottom
-    const listFit = boxH - 2
     const sorted = [...listed].sort(unreadFirst)
-    const paged = sorted.length > listFit
-    const size = paged ? listFit - 1 : listFit
-    const from = Math.min(top, Math.max(0, sorted.length - size))
-    view.leftWidth = narrow ? 0 : left
-    view.listLen = sorted.length
+    const needle = (lq?.q ?? '').toLowerCase()
+    const matched = needle ? sorted.filter(c => c.title.toLowerCase().includes(needle)) : sorted
+    const listRows = boxH - 2 - (Input || lq ? 1 : 0) // border, the search row
+    const searching = !!lq
+    const hits = lq?.hits ?? []
+    const chatsShown = searching ? matched.slice(0, hits.length ? Math.max(3, Math.floor(listRows / 2)) : listRows) : matched
+    const paged = !searching && chatsShown.length > listRows
+    const size = paged ? listRows - 1 : listRows
+    const from = Math.min(top, Math.max(0, chatsShown.length - size))
+    view.leftWidth = narrow ? (peer ? 0 : cols) : left
+    view.listLen = searching ? 0 : chatsShown.length
     view.listFit = size
+    const chatButton = (c: CachedChat) => c.id === peer ? ( // the open chat — in the colour its name has in the conversation
+      <Text key={`chat-${c.id}`} bold color={senderColor(c.title)}>{chatRow(c, true, left - 3)}</Text>
+    ) : (
+      <Button key={`chat-${c.id}`} plain dimColor={c.unread === 0 || c.muted}
+        onPress={() => void openChat($, c.id, current === 'channels' && opt.autoReadChannels !== false && c.kind === 'channel')}>
+        {chatRow(c, false, left - 3)}
+      </Button>
+    )
     const list = (
       <Box flexDirection="column" width={left} height={boxH} borderStyle="round" borderColor={pal.frame}>
-        {sorted.slice(from, from + size).map(c => c.id === peer ? ( // the open chat — in the colour its name has in the conversation
-          <Text key={`chat-${c.id}`} bold color={senderColor(c.title)}>{chatRow(c, true, left - 3)}</Text>
-        ) : (
-          <Button key={`chat-${c.id}`} plain dimColor={c.unread === 0 || c.muted}
-            onPress={() => void openChat($, c.id, current === 'channels' && opt.autoReadChannels !== false && c.kind === 'channel')}>
-            {chatRow(c, false, left - 3)}
+        {searching ? (
+          <Button key="list-clear" plain onPress={() => void runListSearch($, '')}>{fit(`⌕ ${lq!.q}`, left - 7) + ` ✕`}</Button>
+        ) : Input ? (
+          <Input key="list-q" label="⌕" placeholder={t.searchList} submitLabel=" " onSubmit={(value: string) => void runListSearch($, value)} />
+        ) : null}
+        {chatsShown.slice(searching ? 0 : from, (searching ? 0 : from) + size).map(chatButton)}
+        {searching && hits.length > 0 && <Text dimColor>{fit(`── ${t.hitsHead} ──`, left - 2)}</Text>}
+        {searching && hits.slice(0, Math.max(0, listRows - Math.min(chatsShown.length, listRows) - 1)).map(hit => (
+          <Button key={`hit-${hit.peer}-${hit.mid}`} plain onPress={() => void openChat($, hit.peer, false, hit.mid)}>
+            {fit(`${hit.title}: ${hit.text}`, left - 3)}
           </Button>
         ))}
+        {searching && !hits.length && chatsShown.length === 0 && <Text dimColor>{lq!.hits === null && lq!.q.length >= 2 ? t.searching : t.nothingFound}</Text>}
         {paged && (
           <Box flexDirection="row" gap={1}>
             {from > 0 && <Button key="list-up" plain onPress={() => void update($, listTop, () => Math.max(0, from - size))}>▲</Button>}
-            {from + size < sorted.length && <Button key="list-down" plain onPress={() => void update($, listTop, () => from + size)}>▼</Button>}
-            <Text dimColor>{`${from + 1}–${Math.min(from + size, sorted.length)}/${sorted.length}`}</Text>
+            {from + size < chatsShown.length && <Button key="list-down" plain onPress={() => void update($, listTop, () => from + size)}>▼</Button>}
+            <Text dimColor>{`${from + 1}–${Math.min(from + size, chatsShown.length)}/${chatsShown.length}`}</Text>
           </Box>
         )}
       </Box>
@@ -832,54 +1179,177 @@ export const register: Register = (on, options) => {
 
     const bar = (m: Row) => m.out ? pal.accent : m.sender ? senderColor(m.sender) : undefined // mine — the theme's accent, others — a colour per name
     const inner = right - 4 // border and padding
-    const fit = boxH - 3 // border and the title row
+    const fitRows = boxH - 3 // border and the title row
     const textW = inner - 9 // bar, space, time
-    const rowsAll = layoutMessages(shown?.messages ?? [], textW, k => t.openMedia(t.mediaKind[k] ?? k),
-      kind === 'channel' ? undefined : { me: t.me, them: shown?.title })
+    view.textW = textW
+    const texts: Record<number, string> = {}
+    for (const [k, v] of Object.entries(trAll)) if (peer && k.startsWith(`${peer}:`)) texts[+k.slice(peer.length + 1)] = v
+    const rowsAll = rowsOf(shown, texts)
     view.total = rowsAll.length
-    view.fit = fit
-    const lifted = Math.min(hidden, Math.max(0, rowsAll.length - fit))
+    view.fit = fitRows
+    const lifted = Math.min(hidden, Math.max(0, rowsAll.length - fitRows))
     const end = rowsAll.length - lifted
-    const slice = rowsAll.slice(Math.max(0, end - fit), end)
-    const step = Math.max(1, fit - 2)
+    const slice = rowsAll.slice(Math.max(0, end - fitRows), end)
+    const step = Math.max(1, fitRows - 2)
+    const lit = md ? md.mid : pickedMsg?.mid // the picked message (or the one being answered) is lit
+    const back = (m: Row) => (m.mid === undefined ? undefined : m.mid === lit ? pal.frame : m.mid === jumpMid ? '#5a4a12' : undefined)
+
+    // The chat's top row — always exactly one row, so the window never changes height under the pointer:
+    // forwarding, search, a reply or an edit in the making, the actions of the picked message, or the title.
+    const emojis = ['👍', '❤', '🔥', '🤣', '😢', '🙏', '🤔', '👎'] // all in Telegram's list of reactions
+    const topRow = () => {
+      if (fw) {
+        const to = fw.to ? (data.folders[ALL]?.chats ?? []).find(c => c.id === fw.to) : undefined
+        return (
+          <Box flexDirection="row" gap={1} width={inner}>
+            {to ? <Text wrap="truncate-end" bold color={pal.accent}>{t.fwdAsk(to.title)}</Text> : <Text bold color={pal.accent}>{t.fwdTitle}</Text>}
+            {to && <Button key="fwd-yes" variant="primary" onPress={() => void forwardTo($, to.id)}>{t.yes}</Button>}
+            <Button key="fwd-x" plain onPress={() => void update($, fwd, old => (old && old.to ? { ...old, to: null } : null))}>{to ? t.no : t.cancel}</Button>
+          </Box>
+        )
+      }
+      if (fnd) {
+        return fnd.hits === null && fnd.q === '' ? (
+          <Box flexDirection="row" gap={1} width={inner}>
+            {Input && <Input key="chat-q" autoFocus label="⌕" placeholder={t.searchChat} submitLabel=" " onSubmit={(value: string) => void runSearch($, value)} />}
+            <Button key="chat-q-x" plain onPress={() => void update($, found, () => null)}>{t.cancel}</Button>
+          </Box>
+        ) : (
+          <Box flexDirection="row" gap={1} width={inner}>
+            <Text wrap="truncate-end" bold color={pal.accent}>{`⌕ ${fnd.q}`}</Text>
+            <Text dimColor>{fnd.hits ? (fnd.hits.length ? t.found(fnd.hits.length) : t.nothingFound) : t.searching}</Text>
+            <Button key="chat-q-x" plain onPress={() => void update($, found, () => null)}>{t.cancel}</Button>
+          </Box>
+        )
+      }
+      if (md) {
+        return (
+          <Box flexDirection="row" gap={1} width={inner}>
+            <Text wrap="truncate-end" bold color={pal.accent}>{md.kind === 'edit' ? t.editing : t.replying(md.text)}</Text>
+            <Button key="mode-x" plain onPress={() => void cancelMode($)}>{t.cancel}</Button>
+          </Box>
+        )
+      }
+      if (pickedMsg) {
+        const mid = pickedMsg.mid
+        const compact = inner < 58
+        const label = (long: string) => (compact ? long.split(' ')[0]! : long)
+        if (tool === 'react') {
+          return (
+            <Box flexDirection="row" gap={1} width={inner}>
+              {emojis.map(em => <Button key={`react-${em}`} plain onPress={() => void reactTo($, mid, em)}>{em}</Button>)}
+              <Button key="bar-x" plain onPress={() => void update($, toolbar, () => '')}>{t.cancel}</Button>
+            </Box>
+          )
+        }
+        if (tool === 'delete') {
+          return (
+            <Box flexDirection="row" gap={1} width={inner}>
+              <Text bold color={pal.accent}>{t.confirmDel}</Text>
+              <Button key="del-yes" variant="primary" onPress={() => void deleteMessage($, mid)}>{t.yes}</Button>
+              <Button key="del-no" plain onPress={() => void update($, toolbar, () => '')}>{t.no}</Button>
+            </Box>
+          )
+        }
+        return (
+          <Box flexDirection="row" gap={1} width={inner}>
+            {writable && <Button key="act-reply" plain onPress={() => void startReply($, mid)}>{label(t.reply)}</Button>}
+            {writable && pickedMsg.out && <Button key="act-edit" plain onPress={() => void startEdit($, mid)}>{label(t.edit)}</Button>}
+            {writable && pickedMsg.out && <Button key="act-del" plain onPress={() => void update($, toolbar, () => 'delete')}>{label(t.del)}</Button>}
+            <Button key="act-react" plain onPress={() => void update($, toolbar, () => 'react')}>{label(t.react)}</Button>
+            <Button key="act-fwd" plain onPress={() => void startForward($, mid)}>{label(t.forward)}</Button>
+            <Button key="act-x" plain onPress={() => void update($, sel, () => null)}>{t.cancel}</Button>
+          </Box>
+        )
+      }
+      return (
+        <Box flexDirection="row" justifyContent="space-between" width={inner}>
+          <Box flexDirection="row" gap={1}>
+            {narrow && <Button key="back-list" onPress={() => void closeChat($)}>{t.chats}</Button>}
+            <Text bold color={pal.accent} wrap="truncate-end">{title ?? '…'}</Text>
+            <Button key="search-chat" plain onPress={() => void openSearch($)}>⌕</Button>
+            {kind === 'channel' || kind === 'group' ? summaryButton(`c:${peer}`, menuOpen, () => void digestChat($, peer!, title ?? peer!), p => void digestPeriod($, { peer: peer! }, title ?? peer!, p)) : null}
+            {jumpMid !== null && <Button key="to-new" plain onPress={() => void toNewest($)}>{t.toNew}</Button>}
+          </Box>
+          <Box flexDirection="row" gap={1}>
+            <Button key="older" plain onPress={() => void scroll($, step)}>▲</Button>
+            <Button key="newer" plain onPress={() => void scroll($, -step)}>▼</Button>
+          </Box>
+        </Box>
+      )
+    }
+
+    // What fills the window under the top row: the chats to forward to, the search hits, or the messages.
+    const fwdChats = fw ? (data.folders[ALL]?.chats ?? []).filter(c => c.kind !== 'channel' && (!fw.q || c.title.toLowerCase().includes(fw.q.toLowerCase()))) : []
+    const body = () => {
+      if (fw && !fw.to) {
+        return [
+          Input && <Input key={`fwd-q-${fw.q}`} autoFocus label="⌕" placeholder={t.fwdFilter} submitLabel=" "
+            onSubmit={(value: string) => void update($, fwd, old => (old ? { ...old, q: value.trim() } : old))} />,
+          ...fwdChats.slice(0, fitRows - 1).map(c => (
+            <Button key={`fwd-${c.id}`} plain onPress={() => void update($, fwd, old => (old ? { ...old, to: c.id } : old))}>{fit(c.title, inner - 1)}</Button>
+          )),
+          fwdChats.length === 0 && <Text key="fwd-none" dimColor>{t.fwdNone}</Text>,
+        ]
+      }
+      if (fnd?.hits) {
+        return fnd.hits.slice(0, fitRows).map(hit => (
+          <Button key={`qhit-${hit.mid}`} plain onPress={() => void jumpTo($, hit.mid)}>
+            {fit(`${hit.date} ${hit.time}  ${bare(hit) || hit.media || ''}`, inner - 1)}
+          </Button>
+        ))
+      }
+      return [
+          peer && slice.length === 0 && shown && <Text key="nothing" dimColor>{t.nothingYet}</Text>,
+          ...slice.map(m => {
+            const bg = back(m)
+            const lead = <Text color={bar(m)} backgroundColor={bg} dimColor={!m.out && !m.sender && !bg}>▎ </Text>
+            if (m.isDate) return <Box key={m.key} width={inner} justifyContent="center"><Text dimColor>{`── ${m.text} ──`}</Text></Box>
+            if (m.head) {
+              return (
+                <Box key={m.key} flexDirection="row" width={inner}>
+                  <Text color={bar(m)} backgroundColor={bg}>▎ </Text>
+                  <Text bold wrap="truncate-end" color={bar(m)} backgroundColor={bg}>{m.text}</Text>
+                </Box>
+              )
+            }
+            if (m.media || m.trans) {
+              return (
+                <Box key={m.key} flexDirection="row" width={inner}>
+                  {lead}
+                  <Button key={m.media ? `media-${m.media.mid}` : `tr-${m.trans!.mid}`} plain
+                    onPress={() => void (m.media ? openMedia($, m.media.mid, cols) : transcribe($, m.trans!.mid))}>{m.text}</Button>
+                </Box>
+              )
+            }
+            if (m.meta) {
+              return (
+                <Box key={m.key} flexDirection="row" width={inner}>
+                  {lead}
+                  <Box width={textW}><Text wrap="truncate-end" dimColor backgroundColor={bg}>{bg ? fit(m.text, textW) : m.text}</Text></Box>
+                </Box>
+              )
+            }
+            return (
+              <Box key={m.key} flexDirection="row" width={inner}>
+                {lead}
+                <Box width={textW}>
+                  <Button key={`pick-${m.key}`} plain onPress={() => void pickMessage($, m.mid!)}>
+                    <Text wrap="truncate-end" color={bar(m)} backgroundColor={bg}>{bg ? fit(m.text, textW) : m.text}</Text>
+                  </Button>
+                </Box>
+                <Box width={6} flexShrink={0} justifyContent="flex-end"><Text dimColor backgroundColor={bg}>{(m.time ?? '') + (m.edited ? '✎' : '')}</Text></Box>
+              </Box>
+            )
+          }),
+          lifted > 0 && <Box key="lifted" position="absolute" right={1} bottom={0}><Text dimColor>{`▼ ${lifted}`}</Text></Box>,
+      ]
+    }
     const msgView = (
       <Box flexDirection="column" width={right} height={boxH} borderStyle="round" borderColor={peer ? pal.accent : pal.frame} paddingX={1}>
         {!peer && <Text dimColor wrap="wrap">{current === 'private' ? t.pickChat : t.pick}</Text>}
-        {peer && (
-          <Box flexDirection="row" justifyContent="space-between" width={inner}>
-            <Box flexDirection="row" gap={1}>
-              {narrow && <Button key="back-list" onPress={() => void closeChat($)}>{t.chats}</Button>}
-              <Text bold color={pal.accent} wrap="truncate-end">{title ?? '…'}</Text>
-              {unread > 0 && <Button key="mark-read" onPress={() => void markRead($)}>{t.read(unread)}</Button>}
-              <Button key="digest-chat" onPress={() => void digestChat($, peer, title ?? peer)}>{t.summary}</Button>
-            </Box>
-            <Box flexDirection="row" gap={1}>
-              <Button key="older" plain onPress={() => void scroll($, step)}>▲</Button>
-              <Button key="newer" plain onPress={() => void scroll($, -step)}>▼</Button>
-            </Box>
-          </Box>
-        )}
-        {peer && slice.length === 0 && shown && <Text dimColor>{t.nothingYet}</Text>}
-        {slice.map(m => m.isDate ? (
-          <Box key={m.key} width={inner} justifyContent="center"><Text dimColor>{`── ${m.text} ──`}</Text></Box>
-        ) : m.head ? (
-          <Box key={m.key} flexDirection="row" width={inner}>
-            <Text color={bar(m)}>▎ </Text>
-            <Text bold wrap="truncate-end" color={bar(m)}>{m.text}</Text>
-          </Box>
-        ) : m.media ? (
-          <Box key={m.key} flexDirection="row" width={inner}>
-            <Text color={bar(m)} dimColor={!m.out && !m.sender}>▎ </Text>
-            <Button key={`media-${m.media.mid}`} plain onPress={() => void openMedia($, m.media!.mid, cols)}>{m.text}</Button>
-          </Box>
-        ) : (
-          <Box key={m.key} flexDirection="row" width={inner}>
-            <Text color={bar(m)} dimColor={!m.out && !m.sender}>▎ </Text>
-            <Box width={textW}><Text wrap="truncate-end" color={bar(m)}>{m.text}</Text></Box>
-            <Box width={6} flexShrink={0} justifyContent="flex-end"><Text dimColor>{m.time ?? ''}</Text></Box>
-          </Box>
-        ))}
-        {lifted > 0 && <Box position="absolute" right={1} bottom={0}><Text dimColor>{`▼ ${lifted}`}</Text></Box>}
+        {peer && topRow()}
+        {peer && body()}
       </Box>
     )
 
@@ -895,7 +1365,8 @@ export const register: Register = (on, options) => {
         {peer && !writable && <Text dimColor>{t.readOnly}</Text>}
         {writable && (
           <Box borderStyle="round" borderColor={pal.accent} paddingX={1} width={cols}>
-            {Input ? <Input key={`msg-${n}`} autoFocus rows={3} label={`→ ${(title ?? '').slice(0, 20)}`}
+            {Input ? <Input key={`msg-${n}`} autoFocus rows={3} label={`${md?.kind === 'reply' ? '↪' : md?.kind === 'edit' ? '✎' : '→'} ${(title ?? '').slice(0, 20)}`}
+              {...(md?.kind === 'edit' ? { value: md.text } : {})}
               placeholder={t.placeholder} submitLabel=" "
               onSubmit={(value: string) => void send($, value)} /> : <Text dimColor>{t.terminalOnly}</Text>}
           </Box>
