@@ -99,6 +99,7 @@ const theme = atom({ plugin: 'tg-pane', key: 'theme' } as const, 0) // index int
 const listTop = atom({ plugin: 'tg-pane', key: 'listTop' } as const, 0) // first shown row of the chat list
 const login = atom({ plugin: 'tg-pane', key: 'login' } as const, null as Login | null) // not logged in: what to show
 const note = atom({ plugin: 'tg-pane', key: 'note' } as const, '')
+const typed = atom({ plugin: 'tg-pane', key: 'typed' } as const, '') // what is in the input now, to show it while the field itself hides the tail
 const draft = atom({ plugin: 'tg-pane', key: 'draft' } as const, 0)
 const askZone = atom({ plugin: 'tg-pane', key: 'askZone' } as const, false) // no time zone known: ask first
 
@@ -443,6 +444,10 @@ async function markRead($: EngineInterface) {
   await fetchChat($)
 }
 
+async function typing($: EngineInterface, v: string) {
+  await update($, typed, () => v)
+}
+
 let sendChain: Promise<unknown> = Promise.resolve() // messages go out one by one, in the order typed
 
 async function send($: EngineInterface, text: string) {
@@ -453,6 +458,7 @@ async function send($: EngineInterface, text: string) {
   // A fresh, empty field at once, with the cursor in it: the next message can be typed while this one goes out.
   const next = (await read($, draft)) + 1
   await update($, draft, () => next)
+  await update($, typed, () => '')
   await update($, note, () => t.sending)
   for (const wait of [0, 120, 400]) { // the field is drawn on the next render
     if (wait) await new Promise(r => setTimeout(r, wait))
@@ -805,7 +811,9 @@ export const register: Register = (on, options) => {
     // Height budget: header, gap, [folder bar + gap], boxed input (3), status line, one spare row (so the engine
     // always has something to scroll and keeps raising the wheel for us).
     // Room for three lines of typed text: the field wraps by itself, and a redraw while typing takes the cursor away.
-    const inputRows = writable ? 5 : 0
+    const inputRows = writable ? 7 : 0
+    const typedNow = writable ? await read($, typed) : ''
+    const preview = typedNow.length > cols - 24 ? wrapLines(typedNow, cols - 2).slice(-2) : [] // the field shows only the first line while typing
     const boxH = Math.max(7, bodyRows - 2 - (folderBar ? 2 : 0) - inputRows - 2)
     const listFit = boxH - 2
     const sorted = [...listed].sort(unreadFirst)
@@ -890,11 +898,12 @@ export const register: Register = (on, options) => {
         {peer && !writable && <Text dimColor>{t.readOnly}</Text>}
         {writable && (
           <Box borderStyle="round" borderColor={pal.accent} paddingX={1} width={cols}>
-            {Input ? <Input key={`msg-${n}`} autoFocus rows={3} label={`→ ${(title ?? '').slice(0, 20)}`}
+            {Input ? <Input key={`msg-${n}`} autoFocus rows={3} onInput={(v: string) => void typing($, v)} label={`→ ${(title ?? '').slice(0, 20)}`}
               placeholder={t.placeholder} submitLabel={t.send}
               onSubmit={(value: string) => void send($, value)} /> : <Text dimColor>{t.terminalOnly}</Text>}
           </Box>
         )}
+        {writable && [0, 1].map(i => <Text key={`typed-${i}`} dimColor>{preview[preview.length - 2 + i] ?? ' '}</Text>)}
         {footer ?? <Text> </Text>}
         <Text> </Text>
       </Box>
