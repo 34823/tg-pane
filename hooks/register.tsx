@@ -27,7 +27,7 @@ const T = {
     paused: 'auto-refresh paused — press «Refresh»', pickChat: 'Pick a chat on the left. The other person sees «read» only after you reply or press «Mark read».',
     pickFirst: 'Pick a chat first', read: (n: number) => `Mark read (${n})`, summary: 'Summary', readAll: 'Mark all read',
     folders: '← Folders', chats: '← Chats', allRead: 'all read', unread: 'unread', older: '▲ older', newer: '▼ newer', theme: 'theme', openMedia: (k: string) => `▣ ${k} · open`, mediaKind: { photo: 'photo', image: 'image', video: 'video (preview)', file: 'file' } as Record<string, string>,
-    picture: 'picture', split: 'to the side', mediaLoading: 'downloading the picture…', mediaFail: 'could not get the picture', nothingYet: 'No messages yet', pick: 'pick a chat',
+    mediaLoading: 'downloading the picture…', mediaFail: 'could not get the picture', nothingYet: 'No messages yet', pick: 'pick a chat',
     me: 'me', placeholder: 'message, Enter to send', send: 'send', terminalOnly: 'Writing — from the terminal',
     readOnly: 'channel — read only', asked: (f: string) => `Summary of «${f}» requested — the answer comes in the conversation`,
     markedAll: (n: string) => `«${n}»: all marked read`,
@@ -59,7 +59,7 @@ const T = {
     paused: 'автообновление на паузе — нажми «Обновить»', pickChat: 'Выбери чат слева. Собеседник увидит «прочитано», только когда ответишь или нажмёшь «Прочитать».',
     pickFirst: 'Сначала выбери чат', read: (n: number) => `Прочитать (${n})`, summary: 'Сводка', readAll: 'Прочитать всё',
     folders: '← Папки', chats: '← Чаты', allRead: 'всё прочитано', unread: 'непрочит.', older: '▲ раньше', newer: '▼ позже', theme: 'тема', openMedia: (k: string) => `▣ ${k} · открыть`, mediaKind: { photo: 'фото', image: 'картинка', video: 'видео (превью)', file: 'файл' } as Record<string, string>,
-    picture: 'картинка', split: 'вбок', mediaLoading: 'скачиваю картинку…', mediaFail: 'не удалось получить картинку', nothingYet: 'Сообщений пока нет', pick: 'выбери чат',
+    mediaLoading: 'скачиваю картинку…', mediaFail: 'не удалось получить картинку', nothingYet: 'Сообщений пока нет', pick: 'выбери чат',
     me: 'я', placeholder: 'сообщение, Enter — отправить', send: 'отправить', terminalOnly: 'Писать — из терминала',
     readOnly: 'канал — только чтение', asked: (f: string) => `Сводка по «${f}» запрошена — ответ придёт в разговоре`,
     markedAll: (n: string) => `«${n}»: всё помечено прочитанным`,
@@ -93,7 +93,6 @@ const channel = atom({ plugin: 'tg-pane', key: 'channel' } as const, null as str
 const folder = atom({ plugin: 'tg-pane', key: 'folder' } as const, null as string | null) // open folder on «Channels»
 const chat = atom({ plugin: 'tg-pane', key: 'chat' } as const, null as History | null)
 const lift = atom({ plugin: 'tg-pane', key: 'lift' } as const, 0) // how many rows (lines) of the newest messages are scrolled out of view
-const sharp = atom({ plugin: 'tg-pane', key: 'sharp' } as const, true) // the picture as real pixels (Image) rather than ▀ cells
 const viewer = atom({ plugin: 'tg-pane', key: 'viewer' } as const, null as Viewer | null) // a picture open over the chat
 const theme = atom({ plugin: 'tg-pane', key: 'theme' } as const, 0) // index into THEMES
 const listTop = atom({ plugin: 'tg-pane', key: 'listTop' } as const, 0) // first shown row of the chat list
@@ -386,22 +385,6 @@ async function setTheme($: EngineInterface, i?: number) {
   await $.store.set('theme', next)
 }
 
-let viewerPane = '' // the herdr split showing a picture, if the person asked for one
-
-// The picture in a herdr split next to Claude (Kitty graphics), any key closes it.
-async function openSplit($: EngineInterface, file: string) {
-  const me = await $.env.get('HERDR_PANE_ID')
-  if (!me || (await $.env.get('HERDR_ENV')) !== '1') return void $.ui.toast(file)
-  if (viewerPane) await $.process.run(['herdr', 'pane', 'close', viewerPane], { timeoutMs: 10_000 })
-  const split = await $.process.run(['herdr', 'pane', 'split', me, '--direction', 'right', '--no-focus'], { timeoutMs: 10_000 })
-  let id = ''
-  try { const j = JSON.parse(split.stdout); id = j.result?.pane?.pane_id ?? j.result?.pane_id ?? '' } catch { /* no id */ }
-  if (!id) return
-  viewerPane = id
-  const q = (x: string) => `'${x.replace(/'/g, `'\\''`)}'`
-  await $.process.run(['herdr', 'pane', 'run', id, `${q(opt.python || 'python3')} ${q(`${backend($)}/tgview.py`)} ${q(file)}; herdr pane close ${id}`], { timeoutMs: 10_000 })
-}
-
 // A picture of a message: downloaded on request, turned into cells and drawn over the chat inside the pane.
 async function openMedia($: EngineInterface, mid: number, cols: number, rows: number) {
   lastActive = await $.clock.now()
@@ -661,8 +644,8 @@ export const register: Register = (on, options) => {
     isOpen = true
     const cols = e.props.bodyColumns
     const bodyRows = e.props.scroll?.bodyRows ?? (e.viewport?.rows ?? 30) - 4
-    const [current, cachedData, status, themeIdx, auth, zoneAsk, pic, isSharp] = await Promise.all(
-      [read($, tab), read($, cache), read($, note), read($, theme), read($, login), read($, askZone), read($, viewer), read($, sharp)])
+    const [current, cachedData, status, themeIdx, auth, zoneAsk, pic] = await Promise.all(
+      [read($, tab), read($, cache), read($, note), read($, theme), read($, login), read($, askZone), read($, viewer)])
     const pal = THEMES[themeIdx % THEMES.length]!
     const data = cachedData ?? { folders: {} }
     const priv = privateChats(data)
@@ -697,16 +680,11 @@ export const register: Register = (on, options) => {
     if (pic && (Raster || Image)) { // a picture over the chat: the chat is hidden behind it, ✕ (or q) closes
       return (
         <Box flexDirection="column" width={cols} alignItems="center">
-          <Box flexDirection="row" justifyContent="space-between" width={cols}>
-            <Text dimColor>{t.picture}</Text>
-            <Box flexDirection="row" gap={1}>
-              {Image && Raster && <Button key="pic-mode" onPress={() => void update($, sharp, v => !v)}>{isSharp ? '▀' : 'HD'}</Button>}
-              <Button key="pic-split" onPress={() => void openSplit($, pic.file)}>{t.split}</Button>
-              <Button key="close-pic" hotkey="q" onPress={() => void update($, viewer, () => null)}>✕</Button>
-            </Box>
+          <Box flexDirection="row" justifyContent="flex-end" width={cols}>
+            <Button key="close-pic" hotkey="q" onPress={() => void update($, viewer, () => null)}>✕</Button>
           </Box>
           <Box borderStyle="round" borderColor={pal.frame}>
-            {Image && (isSharp || !Raster)
+            {Image
               ? <Image key="pic" source={{ file: pic.file, format: 'png' }} columns={pic.columns} rows={pic.rows} alt=" " />
               : Raster && <Raster key="pic" columns={pic.columns} rows={pic.rows} cells={pic.cells} />}
           </Box>

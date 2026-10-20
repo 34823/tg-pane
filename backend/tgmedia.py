@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """tgmedia.py <peer id> <mid> — download one message's picture (photo, image file, or a video's preview) to
 <data dir>/media/ and print the PNG path. Only on request (the pane's «open» button); nothing is marked read.
-PNG because the Kitty graphics protocol (tgview.py) takes PNG; a JPEG is converted with Pillow if it is there."""
+PNG because the Kitty graphics protocol takes PNG; a JPEG is converted with Pillow if it is there."""
 import base64, os, sys
 from tglib import page, DATA
 

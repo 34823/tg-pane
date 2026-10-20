@@ -20,7 +20,6 @@ declare module 'claude-code' {
       lift: number
       theme: number
       viewer: Viewer | null
-      sharp: boolean
       listTop: number
       login: Login | null
       note: string
