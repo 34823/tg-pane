@@ -812,10 +812,12 @@ export const register: Register = (on, options) => {
     view.listFit = size
     const list = (
       <Box flexDirection="column" width={left} height={boxH} borderStyle="round" borderColor={pal.frame}>
-        {sorted.slice(from, from + size).map(c => (
-          <Button key={`chat-${c.id}`} plain dimColor={(c.unread === 0 || c.muted) && c.id !== peer}
+        {sorted.slice(from, from + size).map(c => c.id === peer ? ( // the open chat — in the colour its name has in the conversation
+          <Text key={`chat-${c.id}`} bold color={senderColor(c.title)}>{chatRow(c, true, left - 3)}</Text>
+        ) : (
+          <Button key={`chat-${c.id}`} plain dimColor={c.unread === 0 || c.muted}
             onPress={() => void openChat($, c.id, current === 'channels' && opt.autoReadChannels !== false && c.kind === 'channel')}>
-            {chatRow(c, c.id === peer, left - 3)}
+            {chatRow(c, false, left - 3)}
           </Button>
         ))}
         {paged && (

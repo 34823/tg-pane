@@ -271,6 +271,6 @@ test('theme button cycles the colour and is kept; the picture button downloads o
   expect(await ui.find({ key: 'close-pic' })).toBeDefined() // the pane is a blank box with ✕
   await ui.press({ key: 'close-pic' })
   expect(runs.some(r => r[1]!.endsWith('tgview.py') && r[2] === 'clear')).toBe(true)
-  expect(await ui.find({ type: 'Button', key: 'chat-111' })).toBeDefined() // closed — the chat is back
+  expect(await ui.find({ key: 'chat-111' })).toBeDefined() // closed — the chat is back
   await ui.unmount()
 })
