@@ -266,6 +266,10 @@ test('theme button cycles the colour and is kept; the picture button downloads o
   expect(runs.some(r => r[1]!.endsWith('tgmedia.py'))).toBe(false) // nothing downloaded until asked
   await ui.press({ key: 'media-7' })
   expect(script(runs.find(r => r[1]!.endsWith('tgmedia.py'))!)).toEqual(['tgmedia.py', '111', '7'])
-  expect(await ui.find({ type: 'Button', key: 'chat-111' })).toBeDefined() // the chat stays; the picture goes to a split
+  expect(script(runs.find(r => r[1]!.endsWith('tgview.py'))!).slice(0, 2)).toEqual(['tgview.py', 'show']) // drawn by Kitty graphics
+  expect(await ui.find({ key: 'close-pic' })).toBeDefined() // the pane is a blank box with ✕
+  await ui.press({ key: 'close-pic' })
+  expect(runs.some(r => r[1]!.endsWith('tgview.py') && r[2] === 'clear')).toBe(true)
+  expect(await ui.find({ type: 'Button', key: 'chat-111' })).toBeDefined() // closed — the chat is back
   await ui.unmount()
 })

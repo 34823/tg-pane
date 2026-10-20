@@ -1,4 +1,5 @@
 export type Kind = 'user' | 'bot' | 'self' | 'group' | 'channel'
+export type Viewer = { file: string } // a picture drawn over the pane (tgview.py)
 export type CachedChat = { id: string; title: string; kind?: Kind; time: string; last: string; unread: number; muted: boolean }
 export type CachedFolder = { updated: number; unread: number; chats: CachedChat[] }
 export type Cache = { updated?: number; order?: string[]; folders: Record<string, CachedFolder> }
@@ -16,6 +17,7 @@ declare module 'claude-code' {
       channel: string | null
       folder: string | null
       chat: History | null
+      viewer: Viewer | null
       lift: number
       theme: number
       listTop: number
