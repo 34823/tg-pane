@@ -30,7 +30,7 @@ Then `/tg-pane`, scan the QR code with your phone — done.
   The other person sees «read» only when you reply or press **Mark read**. **Summary** retells the unread private
   chats (or one chat) in the conversation — without marking them read.
 - **Categories** — **All chats**, then your Telegram folders, with unread counts and a preview. Open one to see its
-  chats, open a chat to read it (in a group, with who wrote what), scroll back with the mouse wheel (or **▲ / ▼**); a picture has an **▣ open** row — it is downloaded only then and shown in a herdr split. **Theme** in the header flips the colour. **Summary** on a folder
+  chats, open a chat to read it (in a group, with who wrote what), scroll back with the mouse wheel (or **▲ / ▼**); a picture has an **▣ open** row — it is downloaded only then and drawn over the chat inside the pane (✕ closes). **Theme** in the header flips the colour. **Summary** on a folder
   or a chat asks Claude to read the unread posts and retell them by topic, right in the conversation. **Mark all read**
   clears a folder.
 - Times on the right, in your time zone: the system's, or — on a server set to UTC — asked once in the pane.
@@ -64,7 +64,7 @@ The backend is a few Python scripts in `backend/` (Playwright). They also work o
 | `tgchat.py <peer> [N] [--read] [--before <mid>]` | a chat's history as JSON |
 | `tgmsg.py --peer <peer> "<text>"` | send one message, check it went out |
 | `tgmedia.py <peer> <mid>` | downloads one message's picture (photo, image, video preview) to the data folder as PNG, only when you press «open» |
-| `tgview.py <png>` | shows that picture in a terminal pane (Kitty graphics), any key closes |
+| `tgcells.py <png> <cols> <rows>` | turns that picture into terminal cells for the pane (needs Pillow) |
 | `tgunread.py "<folder>" \| --peer <id> \| --private [--mark-only]` | unread posts as text for a model; channels and groups are marked read, private chats (and `--private`) never |
 
 ## What it runs, reads and sends
