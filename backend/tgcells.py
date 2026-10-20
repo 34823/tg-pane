@@ -17,4 +17,4 @@ for y in range(r):
     for x in range(c):
         t, b = px[x, 2 * y], px[x, 2 * y + 1]
         out += struct.pack("<III", 0x2580, t[0] << 16 | t[1] << 8 | t[2], b[0] << 16 | b[1] << 8 | b[2])
-print(json.dumps({"columns": c, "rows": r, "cells": base64.b64encode(bytes(out)).decode()}))
+print(json.dumps({"file": path, "columns": c, "rows": r, "cells": base64.b64encode(bytes(out)).decode()}))
