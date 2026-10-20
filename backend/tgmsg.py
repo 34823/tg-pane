@@ -3,7 +3,7 @@
 tgmsg.py --peer <peer id> "<text>" [--dry] — the same by chat id (from the cache); this is how the pane sends.
 Only what the user typed. Checks the chat, sends one message, checks it went out."""
 import sys
-from tglib import page, reset, open_peer, close_chat, zero_unread, MSGS_JS
+from tglib import page, reset, open_peer, close_chat, zero_unread, api_mark_read, api, MSGS_JS
 
 args = [a for a in sys.argv[1:] if a != "--dry"]
 dry = "--dry" in sys.argv
@@ -11,7 +11,28 @@ peer = args[1] if args[0] == "--peer" else None
 name, text = (None, args[2]) if peer else (args[0], args[1])
 if not text.strip():
     sys.exit("empty text — not sending")
+# By id: through Telegram Web's own sendText, no chat opened, no fixed waits (~0.1 s instead of ~12 s).
+SEND_JS = """async ({peer, text}) => { const m = appImManager.managers.appMessagesManager, p = +peer;
+  if (p < 0) { const c = await appImManager.managers.appChatsManager.getChat(-p);
+    if (!c) return 'nochat';
+    if (c._ === 'channel' && c.pFlags?.broadcast) return 'channel (no input field)'; }
+  await m.sendText({peerId: p, text});
+  for (let i = 0; i < 40; i++) {
+    const h = await m.getHistory({peerId: p, limit: 3});
+    for (const id of h.history) {
+      const x = await m.getMessageByPeer(p, id);
+      if (x && x.message === text && Date.now() / 1000 - x.date < 60) return 'ok';
+    }
+    await new Promise(r => setTimeout(r, 100));
+  } return 'unseen' }"""
+
 with page() as pg:
+    if peer and not dry:
+        res = api(pg, SEND_JS, {"peer": peer, "text": text})
+        if res == "ok":
+            api_mark_read(pg, peer)  # replied = the chat is read
+            print("sent"); sys.exit(0)
+        sys.exit("cannot see the sent message in the chat — check it" if res == "unseen" else f"send failed: {res}")
     if peer:
         reset(pg)
         title = open_peer(pg, peer)
