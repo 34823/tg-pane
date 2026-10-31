@@ -2,9 +2,11 @@ import importlib.util
 from concurrent.futures import Future
 from pathlib import Path
 import subprocess
+import sys
 import unittest
 from unittest.mock import patch
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 spec = importlib.util.spec_from_file_location('terminal', Path(__file__).resolve().parents[1] / 'terminal.py')
 assert spec is not None and spec.loader is not None
 tg = importlib.util.module_from_spec(spec)
@@ -22,14 +24,16 @@ class Screen:
     def erase(self): self.lines = {}
     def refresh(self): pass
     def addstr(self, row, col, value, attr=0):
-        assert sum(tg.cell_width(c) for c in value) < self.width
-        self.lines[row] = value
+        assert col + sum(tg.cell_width(c) for c in value) < self.width
+        old = self.lines.get(row, '')
+        self.lines[row] = old[:col].ljust(col) + value + old[col + len(value):]
 
 
 class TerminalTests(unittest.TestCase):
     def pane(self, width=72, height=24):
         pane = tg.Pane(Screen(width, height), CACHE)
         self.addCleanup(pane.pool.shutdown)
+        pane.switch_tab('categories')
         return pane
 
     def test_folders_unique_and_navigation_is_read_only(self):
@@ -106,7 +110,7 @@ class TerminalTests(unittest.TestCase):
         p.handle('1')
         self.assertEqual((p.tab, p.view, p.folder), ('private', 'chats', 'Личные'))
         p.draw()
-        self.assertIn('1 Личные', p.screen.lines[1])
+        self.assertIn('Личные', p.screen.lines[1])
         p.handle('2')
         self.assertEqual(p.view, 'folders')
         for _ in range(6):
@@ -114,8 +118,9 @@ class TerminalTests(unittest.TestCase):
         self.assertEqual(p.theme, 1)
         p.enter()
         p.draw()
-        self.assertIn('Test', p.screen.lines[4])
-        self.assertIn('● 3', p.screen.lines[4])
+        self.assertIn('Test', p.screen.lines[5])
+        self.assertIn('3', p.screen.lines[6])
+        p.enter(); p.draw()
         self.assertTrue(any('╭' in s for s in p.screen.lines.values()))
 
     def test_private_fallback_and_switch_during_load(self):
@@ -128,6 +133,101 @@ class TerminalTests(unittest.TestCase):
         p.pending = (Future(), 'cache')
         p.handle('2')
         self.assertEqual(p.tab, 'private')
+
+    def click(self, p, action, value=None):
+        p.draw()
+        target = next(t for t in p.targets if t[4] == action and (value is None or t[5] == value))
+        p.mouse(target[0], target[1], tg.curses.BUTTON1_RELEASED)
+
+    def test_mouse_complete_compose_confirm_cancel_send_flow(self):
+        p = self.pane()
+        self.click(p, 'all')
+        self.click(p, 'chat', 0)
+        self.click(p, 'compose')
+        for char in 'Mouse draft': p.handle(char)
+        self.click(p, 'send')
+        self.assertEqual(p.confirm['text'], 'Mouse draft')
+        self.click(p, 'cancel')
+        self.assertEqual(p.mode, 'compose')
+        self.assertEqual(p.draft, 'Mouse draft')
+        self.click(p, 'send')
+        p.demo = False
+        with patch.object(p, 'submit') as submit:
+            self.click(p, 'confirm')
+            submit.assert_called_once_with('tgmsg.py', ['--peer', '42', 'Mouse draft'], 'send')
+
+    def test_mouse_search_is_live_and_works_while_editing(self):
+        p = self.pane()
+        self.click(p, 'all')
+        self.click(p, 'search')
+        p.handle('T'); p.handle('e')
+        self.assertEqual(len(p.panel_chats()), 1)
+        p.handle('x')
+        self.assertEqual(p.panel_chats(), [])
+        self.click(p, 'clear_search')
+        self.assertEqual(p.query, '')
+        self.click(p, 'tab', 'private')
+        self.assertEqual(p.tab, 'private')
+
+    def test_mouse_reply_and_back_while_composing(self):
+        p = self.pane()
+        p.switch_tab('all'); p.enter()
+        p.history = {'messages': [{'mid': 7, 'text': 'hello'}]}
+        self.click(p, 'message', 0)
+        self.click(p, 'reply')
+        self.assertEqual(p.reply, 7)
+        self.click(p, 'clear_reply')
+        self.assertEqual(p.reply, 0)
+        self.click(p, 'back')
+        self.assertEqual((p.view, p.mode), ('chats', ''))
+
+    def test_mouse_confirm_modal_blocks_navigation_and_wheel(self):
+        p = self.pane()
+        p.switch_tab('all'); p.enter()
+        p.mode, p.draft = 'compose', 'hi'
+        p.handle('\n')
+        self.click(p, 'tab', 'private')
+        self.assertEqual(p.tab, 'all')
+        self.assertIsNotNone(p.confirm)
+
+    def test_wheel_scrolls_hovered_column_only(self):
+        p = self.pane()
+        p.switch_tab('all'); p.enter()
+        p.history = {'messages': [{'mid': i, 'text': 'A long message ' * 10} for i in range(30)]}
+        p.index = 29
+        p.draw()
+        offset = p.offset
+        x, y, _, _ = p.history_rect
+        p.mouse(x, y, tg.curses.BUTTON4_PRESSED)
+        self.assertEqual(p.offset, offset - 3)
+        x, y, _, _ = p.list_rect
+        p.mouse(x, y, getattr(tg.curses, 'BUTTON5_PRESSED', 0))
+        self.assertEqual(p.offset, offset - 3)
+        self.assertEqual(p.list_offset, 1)
+
+    def test_channel_has_no_send_or_reply_controls(self):
+        p = self.pane()
+        p.switch_tab('all'); p.enter()
+        p.history = {'kind': 'channel', 'messages': [{'mid': 1, 'text': 'News'}]}
+        p.draw()
+        self.assertFalse(any(t[4] in ('compose', 'send', 'reply') for t in p.targets))
+        p.enter()
+        self.assertEqual(p.reply, 0)
+
+    def test_narrow_view_and_resize_preserve_history(self):
+        p = self.pane(32, 30)
+        p.switch_tab('all'); p.enter()
+        p.history = {'messages': [{'mid': 1, 'text': 'слова без рваных переносов ' * 10}]}
+        p.draw()
+        self.assertFalse(p.split)
+        self.assertIsNone(p.list_rect)
+        p.screen.width = 100
+        p.draw()
+        self.assertTrue(p.split)
+        self.assertIsNotNone(p.list_rect)
+        self.assertEqual(p.history['messages'][0]['mid'], 1)
+        for line in tg.wrap('Русский 中🙂 очень длинный текст', 12):
+            self.assertLessEqual(sum(tg.cell_width(c) for c in line), 12)
 
     def test_fixture_never_calls_backend(self):
         p = self.pane()
