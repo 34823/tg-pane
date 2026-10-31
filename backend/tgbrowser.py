@@ -9,7 +9,7 @@ login     interactive: prints the QR code in the terminal until you scan it (Tel
 password  reads the cloud password from stdin and submits it (the pane does this)
 
 Chromium is the one Playwright installs (python -m playwright install chromium)."""
-import json, os, signal, subprocess, sys, time, urllib.request
+import json, os, shlex, signal, subprocess, sys, time, urllib.request
 from tglib import PORT, PROFILE, TZ
 
 URL = "https://web.telegram.org/k/"
@@ -72,13 +72,28 @@ def start():
     sys.exit("Chromium did not start")
 
 
+def is_main_browser(cmd):
+    # Some process-title wrappers flatten argv into one string in /proc.
+    # Match a complete flag, never a port substring or a renderer process.
+    if len(cmd) == 1:
+        try:
+            cmd = shlex.split(cmd[0].decode(errors='replace'))
+        except ValueError:
+            return False
+    else:
+        cmd = [a.decode(errors='replace') for a in cmd]
+    return (bool(cmd) and os.path.basename(cmd[0]) in ('chrome', 'chromium', 'chromium-browser')
+            and f'--remote-debugging-port={PORT}' in cmd
+            and not any(a.startswith('--type=') for a in cmd))
+
+
 def stop():
     for pid in os.listdir("/proc"):
         try:
-            cmd = open(f"/proc/{pid}/cmdline", "rb").read().split(b"\0")
+            cmd = [a for a in open(f"/proc/{pid}/cmdline", "rb").read().split(b"\0") if a]
         except (OSError, ValueError):
             continue
-        if f"--remote-debugging-port={PORT}".encode() in cmd and not any(a.startswith(b"--type=") for a in cmd):
+        if is_main_browser(cmd):
             os.kill(int(pid), signal.SIGTERM); print(f"stopped (pid {pid})")
 
 
@@ -137,10 +152,25 @@ def login():
         time.sleep(2)
 
 
-cmd = sys.argv[1] if len(sys.argv) > 1 else ""
-if cmd == "start": start()
-elif cmd == "stop": stop()
-elif cmd == "status": print(json.dumps(status()))
-elif cmd == "login": login()
-elif cmd == "password": password(sys.stdin.read().rstrip("\n"))
-else: sys.exit(__doc__)
+def restart():
+    stop()
+    for _ in range(40):
+        if not alive():
+            return start()
+        time.sleep(0.25)
+    sys.exit('Chromium did not stop — not starting a second instance')
+
+
+def main():
+    cmd = sys.argv[1] if len(sys.argv) > 1 else ''
+    if cmd == 'start': start()
+    elif cmd == 'stop': stop()
+    elif cmd == 'restart': restart()
+    elif cmd == 'status': print(json.dumps(status()))
+    elif cmd == 'login': login()
+    elif cmd == 'password': password(sys.stdin.read().rstrip('\n'))
+    else: sys.exit(__doc__)
+
+
+if __name__ == '__main__':
+    main()

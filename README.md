@@ -13,6 +13,24 @@
 
 # tg-pane — Telegram in a Claude Code pane
 
+## Standalone terminal (Pi, Codex, native Herdr, or any terminal)
+
+The Python backend also has an independent frontend: `python terminal.py` (use the Python environment
+where Playwright is installed). It uses the same `TG_PANE_DATA` configuration and Telegram session.
+No Claude process or AI model is required. The original Claude plugin remains unchanged.
+
+Folders → chats → history: arrow keys/Enter or mouse, Esc goes back, `/` filters chat names,
+`r` refreshes, wheel/PgUp/PgDown scroll history, `i` writes, Enter on a message replies.
+Sending requires a second explicit `y` confirmation; Esc cancels. Private history is never marked read
+merely by viewing it. `L` opens the existing QR/password login flow. `q` exits.
+
+This is a **basic frontend, not full plugin parity**: message reactions/edit/delete/forward,
+media viewing, digests and message-text search remain available only in the original plugin.
+Requests refresh at most once a minute while open, FLOOD_WAIT pauses for ten minutes,
+and an unresponsive CDP browser is restarted at most once every five minutes.
+No failed send is automatically retried. Offline UI tests: `python -m unittest discover -s tests -p 'test_*.py'`.
+
+
 > Read your Telegram chats and channels beside the conversation, and ask Claude to retell the unread posts by topic.
 > No API key, no bot — it works through your own logged-in Telegram Web.
 
