@@ -81,6 +81,45 @@ class Pane:
         self.targets = []
         self.message_rows = []
         self.manual_scroll = False
+        self.tab = 'categories'
+        self.theme = 0
+        self.colors = False
+        if not self.demo:
+            try:
+                self.theme = int(json.loads((DATA / 'terminal-ui.json').read_text()).get('theme', 0)) % 5
+            except (OSError, ValueError, TypeError):
+                pass
+
+    def palette(self):
+        if not self.colors:
+            return
+        accents = [81, 141, 84, 221, 211] if curses.COLORS >= 256 else [6, 5, 2, 3, 1]
+        curses.init_pair(1, accents[self.theme], -1)
+        curses.init_pair(2, 245 if curses.COLORS >= 256 else 7, -1)
+        curses.init_pair(3, 0, accents[self.theme])
+
+    def style(self, role='accent'):
+        return curses.color_pair({'accent': 1, 'muted': 2, 'selected': 3}[role]) if self.colors else (curses.A_REVERSE if role == 'selected' else 0)
+
+    def switch_tab(self, tab):
+        if self.pending:
+            return
+        self.tab = tab
+        self.view = 'chats' if tab == 'private' else 'folders'
+        self.folder = 'Личные' if tab == 'private' else ''
+        self.index = self.offset = self.reply = 0
+        self.query = self.draft = self.mode = ''
+        self.chat = None
+
+    def cycle_theme(self):
+        self.theme = (self.theme + 1) % 5
+        self.palette()
+        if not self.demo:
+            try:
+                DATA.mkdir(parents=True, exist_ok=True)
+                (DATA / 'terminal-ui.json').write_text(json.dumps({'theme': self.theme}))
+            except OSError:
+                self.status = 'Тема изменена, но не сохранена'
 
     def load_cache(self):
         try:
@@ -93,7 +132,10 @@ class Pane:
             folders = self.cache.get('folders', {})
             return [n for n in dict.fromkeys(['@all', *self.cache.get('order', folders)]) if n in folders]
         if self.view == 'chats':
-            chats = self.cache.get('folders', {}).get(self.folder, {}).get('chats', [])
+            folders = self.cache.get('folders', {})
+            chats = folders.get(self.folder, {}).get('chats', [])
+            if self.tab == 'private' and 'Личные' not in folders:
+                chats = [c for c in folders.get('@all', {}).get('chats', []) if c.get('kind') == 'user']
             return [c for c in chats if self.query.casefold() in c.get('title', '').casefold()]
         return self.history.get('messages', [])
 
@@ -184,6 +226,9 @@ class Pane:
     def back(self):
         if self.pending:
             return
+        if self.view == 'chats' and self.tab == 'private':
+            self.switch_tab('categories')
+            return
         self.view = 'chats' if self.view == 'messages' else 'folders'
         self.index = self.offset = self.reply = 0
         self.query = ''
@@ -197,22 +242,38 @@ class Pane:
             except curses.error:
                 pass
 
+    def aligned(self, left, right, width):
+        right = fit(right, max(0, width // 3))
+        rw = sum(cell_width(c) for c in right)
+        left = fit(left, max(0, width - rw - 2))
+        return left + ' ' * max(1, width - rw - sum(cell_width(c) for c in left)) + right
+
+    def frame(self, row, label=''):
+        width = max(0, self.screen.getmaxyx()[1] - 3)
+        label = fit(' ' + label + ' ', max(0, width - 2)) if label else ''
+        self.put(row, '╭' + label + '─' * max(0, width - sum(cell_width(c) for c in label)) + '╮', self.style())
+
     def draw(self):
         self.screen.erase()
         h, w = self.screen.getmaxyx()
         title = 'Папки' if self.view == 'folders' else self.folder if self.view == 'chats' else (self.chat or {}).get('title', '')
-        self.put(0, 'TG Pane  ·  ' + ('Все чаты' if title == '@all' else title), curses.A_BOLD)
-        self.put(1, '↑↓ выбор · Enter открыть/ответ · Esc назад · q выход')
-        self.put(2, 'r обновить · / поиск · i писать · PgUp раньше · L вход')
+        accent, muted = self.style(), self.style('muted')
+        themes = ['cyan', 'violet', 'green', 'amber', 'rose']
+        self.put(0, self.aligned(' ◈ Telegram', '● ' + themes[self.theme] + ' · t', w - 2), accent | curses.A_BOLD)
+        self.put(1, (' ▸ 1 Личные     2 Категории' if self.tab == 'private' else '   1 Личные   ▸ 2 Категории'), accent | curses.A_BOLD)
+        title = 'Все чаты' if title == '@all' else title
+        self.put(2, self.aligned(' ← ' + title if self.view != 'folders' else ' Категории', 'r ↻  / ⌕', w - 2), muted)
+        self.put(3, '─' * max(0, w - 2), muted)
         items = self.items()
-        capacity = max(1, h - 7)
+        capacity = max(1, h - 10)
         self.message_rows = []
         if self.view == 'messages':
             lines = []
             for i, m in enumerate(items):
-                prefix = f"{m.get('date', '')} {m.get('time', '')}  " + ('Вы' if m.get('out') else m.get('from', ''))
+                sender = 'Вы' if m.get('out') else m.get('from', '') or title
+                prefix = self.aligned(sender, f"{m.get('date', '')} {m.get('time', '')}", max(2, w - 5))
                 lines.append((i, prefix))
-                lines.extend((i, '  ' + line) for line in wrap(m.get('text') or '[медиа]', max(2, w - 4)))
+                lines.extend((i, '│ ' + line) for line in wrap(m.get('text') or '▣ медиа', max(2, w - 7)))
                 lines.append((i, ''))
             positions = [j for j, (i, _) in enumerate(lines) if i == self.index]
             if positions and not self.manual_scroll:
@@ -222,34 +283,47 @@ class Pane:
                 elif last >= self.offset + capacity:
                     self.offset = max(first, last - capacity + 1) if last - first < capacity else first
             self.offset = min(self.offset, max(0, len(lines) - capacity))
-            for row, (i, line) in enumerate(lines[self.offset:self.offset + capacity], 3):
+            for row, (i, line) in enumerate(lines[self.offset:self.offset + capacity], 4):
                 self.put(row, ('▸ ' if i == self.index else '  ') + line,
-                         curses.A_REVERSE if i == self.index else 0)
+                         accent if i == self.index or items[i].get('out') else 0)
                 self.message_rows.append((row, i))
         else:
+            count = max(1, capacity // 2)
             self.offset = min(self.offset, self.index)
-            if self.index >= self.offset + capacity:
-                self.offset = self.index - capacity + 1
-            for row, item in enumerate(items[self.offset:self.offset + capacity], 3):
-                i = self.offset + row - 3
-                if self.view == 'folders':
-                    folder = self.cache['folders'].get(item, {})
-                    label = f"{'Все чаты' if item == '@all' else item}  ({folder.get('unread', 0)})"
-                else:
-                    label = f"{item.get('title', '')}  ({item.get('unread', 0)}) {item.get('time', '')} · {item.get('last', '')}"
-                self.put(row, ('▸ ' if i == self.index else '  ') + label, curses.A_REVERSE if i == self.index else 0)
-                self.message_rows.append((row, i))
+            if self.index >= self.offset + count:
+                self.offset = self.index - count + 1
+            for slot, item in enumerate(items[self.offset:self.offset + count]):
+                row, i = 4 + slot * 2, self.offset + slot
+                selected = i == self.index
+                data = self.cache['folders'].get(item, {}) if self.view == 'folders' else item
+                name = ('Все чаты' if item == '@all' else item) if self.view == 'folders' else item.get('title', '')
+                unread = data.get('unread', 0)
+                badge = f'● {unread}' if unread else '✓'
+                if self.view == 'chats':
+                    badge = f"{data.get('time', '')}  {badge}"
+                label = self.aligned(('▸ ' if selected else '  ') + name, badge, w - 3)
+                self.put(row, label + ' ' * max(0, w - 2 - sum(cell_width(c) for c in label)),
+                         self.style('selected') | curses.A_BOLD if selected else (accent if unread else 0))
+                preview = data.get('last', '') if self.view == 'chats' else f"{len(data.get('chats', []))} чатов · Enter открыть"
+                self.put(row + 1, '  ' + clean(preview).replace('\n', ' '), muted)
+                self.message_rows.extend([(row, i), (row + 1, i)])
         if not items:
             self.put(4, 'Пока пусто' if not self.pending else 'Загрузка…')
+        label = 'Подтверждение' if self.confirm else 'Поиск' if self.mode == 'search' else 'Ответ ↪' if self.reply else 'Сообщение' if self.view == 'messages' else 'Поиск чатов'
+        self.frame(h - 6, label)
         if self.confirm:
-            self.put(h - 3, f"Отправить в «{self.confirm['title']}»? y — да, Esc — отмена", curses.A_BOLD)
+            prompt = f"Отправить в «{self.confirm['title']}»? y/д · Esc отмена"
         elif self.mode:
-            self.put(h - 3, ('Поиск: ' if self.mode == 'search' else f'Сообщение{" ↪" if self.reply else ""}: ') + self.draft, curses.A_BOLD)
+            prompt = self.draft + '▏'
         elif self.query:
-            self.put(h - 3, 'Фильтр: ' + self.query)
+            prompt = self.query
         else:
-            self.put(h - 3, 'i — новое сообщение · Enter — ответ' if self.view == 'messages' else 'Выберите папку/чат')
-        self.put(h - 2, self.status)
+            prompt = 'i — написать · Enter — ответить' if self.view == 'messages' else '/ — найти чат'
+        content = fit(prompt, max(0, w - 5))
+        self.put(h - 5, '│ ' + content + ' ' * max(0, w - 5 - sum(cell_width(c) for c in content)) + ' │', accent if self.mode or self.confirm else muted)
+        self.put(h - 4, '╰' + '─' * max(0, w - 3) + '╯', accent)
+        self.put(h - 3, ' ' + self.status, muted)
+        self.put(h - 2, ' ↑↓ выбор · Enter открыть · Esc назад · q выход', muted)
         self.screen.refresh()
 
     def handle(self, key):
@@ -282,7 +356,11 @@ class Pane:
             elif isinstance(key, str) and key.isprintable():
                 self.draft += key
             return True
-        if key in ('q', '\x03'):
+        if key in ('1', '2'):
+            self.switch_tab('private' if key == '1' else 'categories')
+        elif key == 't':
+            self.cycle_theme()
+        elif key in ('q', '\x03'):
             return False
         if key in (curses.KEY_UP, curses.KEY_DOWN):
             self.manual_scroll = False
@@ -314,8 +392,19 @@ class Pane:
             self.refresh()
         elif key == curses.KEY_MOUSE:
             try:
-                _, _, y, _, buttons = curses.getmouse()
+                _, x, y, _, buttons = curses.getmouse()
                 if buttons & curses.BUTTON1_CLICKED:
+                    if y == 0:
+                        self.cycle_theme()
+                    elif y == 1:
+                        self.switch_tab('private' if x < 14 else 'categories')
+                    elif y == 2 and x < 5:
+                        self.back()
+                    elif y == self.screen.getmaxyx()[0] - 5:
+                        if self.view == 'chats':
+                            self.mode, self.draft = 'search', self.query
+                        elif self.view == 'messages' and self.history.get('kind') != 'channel':
+                            self.mode, self.reply = 'compose', 0
                     for row, index in self.message_rows:
                         if y == row:
                             self.index = index
@@ -336,6 +425,8 @@ class Pane:
     def run(self):
         curses.curs_set(0)
         curses.use_default_colors()
+        self.colors = curses.has_colors()
+        self.palette()
         curses.mousemask(curses.ALL_MOUSE_EVENTS)
         self.screen.timeout(100)
         self.refresh()

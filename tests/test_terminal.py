@@ -101,6 +101,34 @@ class TerminalTests(unittest.TestCase):
                 p.draw()
                 self.assertTrue(tg.wrap('中' * 8, width))
 
+    def test_tabs_theme_and_chat_preview(self):
+        p = self.pane()
+        p.handle('1')
+        self.assertEqual((p.tab, p.view, p.folder), ('private', 'chats', 'Личные'))
+        p.draw()
+        self.assertIn('1 Личные', p.screen.lines[1])
+        p.handle('2')
+        self.assertEqual(p.view, 'folders')
+        for _ in range(6):
+            p.handle('t')
+        self.assertEqual(p.theme, 1)
+        p.enter()
+        p.draw()
+        self.assertIn('Test', p.screen.lines[4])
+        self.assertIn('● 3', p.screen.lines[4])
+        self.assertTrue(any('╭' in s for s in p.screen.lines.values()))
+
+    def test_private_fallback_and_switch_during_load(self):
+        p = self.pane()
+        p.cache = {'folders': {'@all': {'chats': [
+            {'id': '1', 'title': 'Person', 'kind': 'user'},
+            {'id': '2', 'title': 'Channel', 'kind': 'channel'}]}}}
+        p.handle('1')
+        self.assertEqual([c['id'] for c in p.items()], ['1'])
+        p.pending = (Future(), 'cache')
+        p.handle('2')
+        self.assertEqual(p.tab, 'private')
+
     def test_fixture_never_calls_backend(self):
         p = self.pane()
         with patch.object(tg, 'backend', side_effect=AssertionError('must not run')):
