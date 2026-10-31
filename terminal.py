@@ -87,7 +87,6 @@ class Pane:
         self.status = 'Демонстрация · без отправки' if self.demo else 'Обновление…'
         self.draft = ''
         self.mode = ''
-        self.confirm = None
         self.reply = 0
         self.pool = ThreadPoolExecutor(max_workers=1)
         self.pending = None
@@ -311,17 +310,17 @@ class Pane:
                 preview = clean(item.get('last', '') or 'Нет сообщений').replace('\n', ' ')
                 selected = str(item.get('id')) == str((self.chat or {}).get('id')) if self.view == 'messages' else index == self.index
             attr = self.style('selected') if selected else 0
-            # A compact avatar occupies the first three cells, like Telegram's chat list.
-            avatar = '▣' if folders else (fit(title.strip(), 1).upper() or '·')
-            self.paint(row, 0, f' {avatar} ', 3, attr or self.style(), True)
+            # Fill complete rows, including the gaps around timestamps and badges.
+            self.paint(row, 0, '', size - 1, attr, True)
+            self.paint(row + 1, 0, '', size - 1, attr, True)
             stamp = str(info.get('time', ''))
-            available = max(0, size - 5 - width(stamp))
+            available = max(0, size - 3 - width(stamp))
             caption = fit(title, available - 1) + '…' if width(title) > available else title
-            self.paint(row, 3, caption, available, attr | curses.A_BOLD, True)
-            self.paint(row, max(3, size - width(stamp) - 1), stamp, width(stamp), attr)
+            self.paint(row, 1, caption, available, attr | curses.A_BOLD)
+            self.paint(row, size - width(stamp) - 1, stamp, width(stamp), attr)
             unread = info.get('unread', 0)
             badge = f' {unread} ' if unread else ''
-            self.paint(row + 1, 0, '   ' + preview, max(0, size - 1 - width(badge)), attr or muted, True)
+            self.paint(row + 1, 1, preview, max(0, size - 2 - width(badge)), attr or muted)
             if badge:
                 self.paint(row + 1, size - width(badge) - 1, badge, width(badge), self.style('selected'))
             self.paint(row + 2, 0, '─' * (size - 1), size - 1, muted)
@@ -339,11 +338,11 @@ class Pane:
                 lines.append((index, 'date', date, False))
                 previous_date = date
             own = bool(msg.get('out'))
-            body = wrap(msg.get('text') or '▣ Медиа', max(2, size - 9))
+            body = wrap(msg.get('text') or '▣ Медиа', max(2, size - 10))
             sender = 'Вы' if own else msg.get('from', '') or (self.chat or {}).get('title', '')
             if index == self.index:
                 sender = '▸ ' + sender
-            bubble_width = min(max(8, max([width(line) for line in body] + [width(sender) + 2, 10])), max(8, size - 8))
+            bubble_width = min(max(8, max([width(line) + 2 for line in body] + [width(sender) + 2, 10])), max(8, size - 8))
             lines.append((index, 'top', (bubble_width, sender), own))
             lines.extend((index, 'body', (bubble_width, line), own) for line in body)
             lines.append((index, 'bottom', (bubble_width, msg.get('time', '') + (' ✓' if own else '')), own))
@@ -380,14 +379,16 @@ class Pane:
             bw, text = value
             start = x + max(1, size - bw - 4) if own else x + 1
             if kind == 'top':
-                text = '╭ ' + fit(text, bw - 2)
-                text += '─' * max(0, bw + 1 - width(text)) + '╮'
+                header = ' ' + fit(text, bw - 2)
+                text = '╭' + header + '─' * max(0, bw - width(header)) + '╮'
             elif kind == 'bottom':
-                text = '╰' + '─' * max(0, bw - width(text) - 1) + ' ' + text + '╯'
+                stamp = ' ' + fit(text, bw - 1)
+                text = '╰' + '─' * max(0, bw - width(stamp)) + stamp + '╯'
             else:
-                text = '│ ' + text + ' ' * max(0, bw - width(text) - 1) + '│'
-            self.paint(row, start, text, size - (start - x) - 1, attr)
-            self.target(start, row, min(bw + 2, size - (start - x) - 1), 1, 'message', i)
+                content = ' ' + fit(text, bw - 2)
+                text = '│' + content + ' ' * max(0, bw - width(content)) + '│'
+            self.paint(row, start, text, bw + 2, attr)
+            self.target(start, row, bw + 2, 1, 'message', i)
         self.history_rect = (x, 5, size, capacity)
         if not lines:
             self.paint(6, x + 2, 'Загрузка…' if self.pending else 'Пока нет сообщений', size - 3, muted)
@@ -401,16 +402,11 @@ class Pane:
         if self.history.get('kind') == 'channel':
             self.paint(h - 4, x + 2, 'Канал · только чтение', size - 3, muted)
             return
-        if self.confirm:
-            self.paint(h - 5, x + 1, 'Отправить сообщение?', size - 2, accent | curses.A_BOLD)
-            self.button(h - 4, x + 1, ' Да, отправить ', 'confirm', active=True)
-            self.button(h - 3, x + 1, ' Отмена ', 'cancel')
-            return
         label = ' Ответ ↪ ' if self.reply else ' Сообщение '
         self.paint(h - 5, x + 1, '╭' + label + '─' * max(0, size - width(label) - 4) + '╮', size - 2, accent)
         prompt = self.draft + ('▏' if self.mode == 'compose' else '') if self.draft or self.mode == 'compose' else 'Написать…'
         content = fit(prompt, size - 7)
-        self.paint(h - 4, x + 1, '│ ' + content + ' ' * max(0, size - 6 - width(content)) + '│', size - 2, accent if self.mode == 'compose' else muted, True)
+        self.paint(h - 4, x + 1, '│ ' + content + ' ' * max(0, size - 5 - width(content)) + '│', size - 2, accent if self.mode == 'compose' else muted, True)
         self.paint(h - 3, x + 1, '╰' + '─' * max(0, size - 4) + '╯', size - 2, accent)
         self.target(x + 1, h - 5, size - 2, 3, 'compose')
         # Small panes get a separate send row; never overlap input's hit area.
@@ -464,8 +460,6 @@ class Pane:
     def mouse(self, x, y, buttons):
         wheel = curses.BUTTON4_PRESSED | getattr(curses, 'BUTTON5_PRESSED', 0)
         if buttons & wheel:
-            if self.confirm:
-                return
             delta = -1 if buttons & curses.BUTTON4_PRESSED else 1
             if self.inside(self.history_rect, x, y):
                 self.manual_scroll = True
@@ -481,18 +475,12 @@ class Pane:
             return
         for tx, ty, tw, th, action, value in reversed(self.targets):
             if self.inside((tx, ty, tw, th), x, y):
-                if self.confirm and action not in ('confirm', 'cancel'):
-                    return
                 self.action(action, value, bool(buttons & curses.BUTTON1_DOUBLE_CLICKED))
                 return
 
     def action(self, action, value=None, double=False):
         if action == 'theme':
             self.cycle_theme()
-        elif action == 'confirm':
-            self.handle('y')
-        elif action == 'cancel':
-            self.handle('\x1b')
         elif action in ('tab', 'all'):
             self.switch_tab(value if action == 'tab' else 'all')
         elif action == 'back':
@@ -545,6 +533,23 @@ class Pane:
         elif action == 'quit':
             self.running = False
 
+    def send_draft(self):
+        if not self.draft.strip() or not self.chat or self.pending or self.history.get('kind') == 'channel':
+            return
+        if self.demo:
+            self.status = 'Демонстрация · отправка отключена'
+            self.draft = ''
+            self.reply = 0
+            self.mode = ''
+            return
+        args = ['--peer', self.chat['id'], self.draft]
+        if self.reply:
+            args += ['--reply', str(self.reply)]
+        self.submit('tgmsg.py', args, 'send')
+        # Retain the exact draft until verified success; reject another send while pending.
+        if self.pending:
+            self.mode = ''
+
     def handle(self, key):
         if key == curses.KEY_MOUSE:
             try:
@@ -552,19 +557,6 @@ class Pane:
                 self.mouse(x, y, buttons)
             except curses.error:
                 pass
-            return True
-        if self.confirm:
-            if key in ('y', 'Y', 'д', 'Д'):
-                command = self.confirm
-                self.confirm = None
-                if not self.demo:
-                    args = ['--peer', command['peer'], command['text']]
-                    if command['reply']:
-                        args += ['--reply', str(command['reply'])]
-                    self.submit('tgmsg.py', args, 'send')
-            elif key == '\x1b':
-                self.confirm = None
-                self.mode = 'compose'
             return True
         if self.mode:
             if key == '\x1b':
@@ -574,8 +566,9 @@ class Pane:
                 if self.mode == 'search':
                     self.query = self.draft
                     self.index = self.offset = 0
-                elif self.draft.strip() and self.chat and not self.pending:
-                    self.confirm = {'peer': self.chat['id'], 'title': self.chat['title'], 'text': self.draft, 'reply': self.reply}
+                else:
+                    self.send_draft()
+                    return True
                 self.mode = ''
             elif key in (curses.KEY_BACKSPACE, '\x7f', '\b'):
                 self.draft = self.draft[:-1]
@@ -634,7 +627,7 @@ class Pane:
         try:
             while self.running:
                 self.poll()
-                if not self.pending and not self.mode and not self.confirm and time.monotonic() - self.last_refresh >= 60:
+                if not self.pending and not self.mode and time.monotonic() - self.last_refresh >= 60:
                     self.refresh()
                 self.draw()
                 try:

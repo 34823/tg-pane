@@ -20,11 +20,15 @@ class Screen:
     def __init__(self, width=72, height=24):
         self.width, self.height = width, height
         self.lines = {}
+        self.writes = []
     def getmaxyx(self): return self.height, self.width
-    def erase(self): self.lines = {}
+    def erase(self):
+        self.lines = {}
+        self.writes = []
     def refresh(self): pass
     def addstr(self, row, col, value, attr=0):
         assert col + sum(tg.cell_width(c) for c in value) < self.width
+        self.writes.append((row, col, value, attr))
         old = self.lines.get(row, '')
         self.lines[row] = old[:col].ljust(col) + value + old[col + len(value):]
 
@@ -51,20 +55,14 @@ class TerminalTests(unittest.TestCase):
             self.assertEqual(submit.call_args.args, ('tgchat.py', ['42', '40'], 'history'))
             self.assertNotIn('--read', str(submit.call_args))
 
-    def test_send_requires_explicit_confirmation_and_exact_target(self):
+    def test_enter_sends_immediately_to_exact_target(self):
         p = self.pane()
         p.enter(); p.enter()
         p.handle('i')
         for ch in 'Привет; $(danger)': p.handle(ch)
+        p.demo = False
         with patch.object(p, 'submit') as submit:
             p.handle('\n')
-            submit.assert_not_called()
-            self.assertEqual(p.confirm['peer'], '42')
-            p.handle('\x1b')
-            submit.assert_not_called()
-            p.handle('\n')
-            p.demo = False
-            p.handle('y')
             submit.assert_called_once_with('tgmsg.py', ['--peer', '42', 'Привет; $(danger)'], 'send')
 
     def test_reply_and_draft_cleared_after_verified_send(self):
@@ -74,10 +72,9 @@ class TerminalTests(unittest.TestCase):
         p.enter()
         self.assertEqual(p.reply, 12)
         p.draft = 'answer'
-        p.handle('\n')
         p.demo = False
         with patch.object(p, 'submit') as submit:
-            p.handle('y')
+            p.handle('\n')
             submit.assert_called_once_with('tgmsg.py', ['--peer', '42', 'answer', '--reply', '12'], 'send')
         f = Future(); f.set_result(subprocess.CompletedProcess([], 0, 'sent', ''))
         p.pending = (f, 'send')
@@ -139,22 +136,17 @@ class TerminalTests(unittest.TestCase):
         target = next(t for t in p.targets if t[4] == action and (value is None or t[5] == value))
         p.mouse(target[0], target[1], tg.curses.BUTTON1_RELEASED)
 
-    def test_mouse_complete_compose_confirm_cancel_send_flow(self):
+    def test_mouse_send_is_immediate(self):
         p = self.pane()
         self.click(p, 'all')
         self.click(p, 'chat', 0)
         self.click(p, 'compose')
         for char in 'Mouse draft': p.handle(char)
-        self.click(p, 'send')
-        self.assertEqual(p.confirm['text'], 'Mouse draft')
-        self.click(p, 'cancel')
-        self.assertEqual(p.mode, 'compose')
-        self.assertEqual(p.draft, 'Mouse draft')
-        self.click(p, 'send')
         p.demo = False
         with patch.object(p, 'submit') as submit:
-            self.click(p, 'confirm')
+            self.click(p, 'send')
             submit.assert_called_once_with('tgmsg.py', ['--peer', '42', 'Mouse draft'], 'send')
+        self.assertFalse(any(t[4] in ('confirm', 'cancel') for t in p.targets))
 
     def test_mouse_search_is_live_and_works_while_editing(self):
         p = self.pane()
@@ -181,14 +173,44 @@ class TerminalTests(unittest.TestCase):
         self.click(p, 'back')
         self.assertEqual((p.view, p.mode), ('chats', ''))
 
-    def test_mouse_confirm_modal_blocks_navigation_and_wheel(self):
+    def test_pending_send_does_not_duplicate_and_keeps_draft(self):
         p = self.pane()
         p.switch_tab('all'); p.enter()
+        p.demo = False
         p.mode, p.draft = 'compose', 'hi'
-        p.handle('\n')
-        self.click(p, 'tab', 'private')
-        self.assertEqual(p.tab, 'all')
-        self.assertIsNotNone(p.confirm)
+        p.pending = (Future(), 'send')
+        with patch.object(p, 'submit') as submit:
+            p.handle('\n')
+            self.click(p, 'send')
+            submit.assert_not_called()
+        self.assertEqual(p.draft, 'hi')
+
+    def test_chat_rows_have_no_avatar_and_full_selection_background(self):
+        p = self.pane()
+        p.switch_tab('all')
+        p.cache = {'folders': {'@all': {'chats': [
+            {'id': '42', 'title': 'Shah', 'time': '1.10', 'unread': 3, 'last': 'preview'}]}}}
+        p.draw()
+        self.assertTrue(p.screen.lines[5].startswith(' Shah'))
+        bases = [v for row, col, v, attr in p.screen.writes if row in (5, 6) and col == 0]
+        self.assertEqual(len(bases), 2)
+        self.assertEqual([tg.width(v) for v in bases], [24, 24])
+
+    def test_message_and_input_borders_align_without_truncation(self):
+        for columns in (24, 32, 70, 120):
+            p = self.pane(columns, 40)
+            p.switch_tab('all'); p.enter()
+            p.history = {'messages': [{'mid': 1, 'from': 'Sender', 'time': '14:50',
+                                       'text': 'Привет! Русский текст и 中🙂 ' * 2}]}
+            p.draw()
+            targets = [t for t in p.targets if t[4] == 'message']
+            self.assertGreaterEqual(len(targets), 3)
+            self.assertEqual(len({(x, n) for x, _, n, _, _, _ in targets}), 1)
+            for x, row, n, _, _, _ in targets:
+                painted = [v for y, col, v, _ in p.screen.writes if y == row and col == x]
+                self.assertEqual(tg.width(painted[-1]), n)
+                self.assertIn(painted[-1][-1], '╮│╯')
+            self.assertNotIn('Отправить сообщение?', '\n'.join(p.screen.lines.values()))
 
     def test_wheel_scrolls_hovered_column_only(self):
         p = self.pane()
