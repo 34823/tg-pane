@@ -12,9 +12,15 @@ from pathlib import Path
 import subprocess
 import sys
 import time
-from typing import Any
+from typing import Any, cast
 
 import unicodedata
+from functools import lru_cache
+
+try:
+    from PIL import Image, ImageOps
+except ImportError:
+    Image = ImageOps = None
 
 ROOT = Path(__file__).resolve().parent
 DATA = Path(os.environ.get('TG_PANE_DATA', '~/.local/share/tg-pane')).expanduser()
@@ -72,6 +78,23 @@ def backend(script, *args):
                           capture_output=True, text=True, timeout=150)
 
 
+@lru_cache(maxsize=128)
+def image_pixels(path, cols, rows, modified):
+    if Image is None or ImageOps is None:
+        return ()
+    try:
+        with Image.open(path) as image:
+            image = ImageOps.exif_transpose(image).convert('RGB')
+            image.thumbnail((cols, rows * 2), Image.Resampling.LANCZOS)
+            image = image.resize((image.width, max(1, (image.height + 1) // 2)), Image.Resampling.LANCZOS)
+            def color(x, y):
+                r, g, b = cast(tuple[int, int, int], image.getpixel((x, y)))
+                return 16 + 36 * round(r / 51) + 6 * round(g / 51) + round(b / 51)
+            return tuple(tuple(color(x, y) for x in range(image.width)) for y in range(image.height))
+    except (OSError, ValueError):
+        return ()
+
+
 class Pane:
     def __init__(self, screen, fixture=None):
         self.screen = screen
@@ -93,6 +116,9 @@ class Pane:
         self.last_refresh = self.pause_until = self.last_start = 0
         self.targets = []
         self.message_rows = []
+        self.media_failed = set()
+        self.media_view = None
+        self.visible_media = []
         self.manual_scroll = False
         self.tab = 'all'
         self.list_offset = 0
@@ -116,6 +142,9 @@ class Pane:
         curses.init_pair(3, 0, accents[self.theme])
         curses.init_pair(4, 255 if curses.COLORS >= 256 else 7, 236 if curses.COLORS >= 256 else 0)
         curses.init_pair(5, 255 if curses.COLORS >= 256 else 7, 24 if curses.COLORS >= 256 else 4)
+        if curses.COLORS >= 256 and curses.COLOR_PAIRS >= 222:
+            for color in range(16, 232):
+                curses.init_pair(color - 10, color, -1)
 
     def style(self, role='accent'):
         return curses.color_pair({'accent': 1, 'muted': 2, 'selected': 3, 'bubble': 4, 'own': 5}[role]) if self.colors else (curses.A_REVERSE if role == 'selected' else 0)
@@ -181,6 +210,8 @@ class Pane:
         try:
             result = future.result()
             if result.returncode:
+                if purpose.startswith('media:'):
+                    self.media_failed.add(purpose[6:])
                 if result.returncode == 75:
                     self.pause_until = time.monotonic() + 600
                     self.status = 'FLOOD_WAIT: пауза 10 минут'
@@ -203,6 +234,9 @@ class Pane:
                 self.history = history
                 if purpose == 'history':
                     self.index = max(0, len(self.items()) - 1)
+            elif purpose.startswith('media:'):
+                self.status = 'Изображение загружено'
+                return
             elif purpose == 'send':
                 self.draft = ''
                 self.reply = 0
@@ -329,6 +363,36 @@ class Pane:
             self.paint(6, 2, 'Загрузка…' if self.pending else 'Нет чатов', size - 3, muted)
         self.list_rect = (0, 5, size, max(1, bottom - 5))
 
+    def media_path(self, msg):
+        if not self.chat or msg.get('media') not in ('photo', 'image', 'video'):
+            return None
+        peer, mid = str(self.chat.get('id', '')), str(msg.get('mid', ''))
+        if not peer.lstrip('-').isdigit() or not mid.isdigit():
+            return None
+        return DATA / 'media' / f'{peer}_{mid}.png'
+
+    def pixels(self, path, cols, rows):
+        try:
+            return image_pixels(str(path), max(1, cols), max(1, rows), path.stat().st_mtime_ns)
+        except OSError:
+            return ()
+
+    def draw_pixels(self, y, x, pixels):
+        if not self.colors or curses.COLORS < 256 or curses.COLOR_PAIRS < 222:
+            return
+        for dy, row in enumerate(pixels):
+            for dx, color in enumerate(row):
+                self.paint(y + dy, x + dx, '█', 1, curses.color_pair(color - 10))
+
+    def load_visible_media(self):
+        if self.demo or self.pending or self.view != 'messages' or not self.chat or Image is None:
+            return
+        for msg in self.visible_media:
+            path = self.media_path(msg)
+            if path and not path.exists() and str(path) not in self.media_failed:
+                self.submit('tgmedia.py', [self.chat['id'], msg['mid']], 'media:' + str(path))
+                break
+
     def message_lines(self, size):
         lines = []
         previous_date = None
@@ -338,12 +402,22 @@ class Pane:
                 lines.append((index, 'date', date, False))
                 previous_date = date
             own = bool(msg.get('out'))
-            body = wrap(msg.get('text') or '▣ Медиа', max(2, size - 10))
+            media = self.media_path(msg)
+            content = (msg.get('text') or '').removeprefix('[media]').strip()
+            body = wrap(content, max(2, size - 10)) if content else ([] if media else ['▣ Медиа'])
             sender = 'Вы' if own else msg.get('from', '') or (self.chat or {}).get('title', '')
             if index == self.index:
                 sender = '▸ ' + sender
             bubble_width = min(max(8, max([width(line) + 2 for line in body] + [width(sender) + 2, 10])), max(8, size - 8))
+            pixels = self.pixels(media, min(30, max(2, size - 12)), 8) if media and self.colors and curses.COLORS >= 256 and curses.COLOR_PAIRS >= 222 else ()
+            if pixels:
+                bubble_width = min(max(bubble_width, len(pixels[0]) + 2), max(8, size - 8))
             lines.append((index, 'top', (bubble_width, sender), own))
+            if media:
+                if pixels:
+                    lines.extend((index, 'image', (bubble_width, row), own) for row in pixels)
+                else:
+                    lines.append((index, 'media', (bubble_width, '▣ Фото · открыть'), own))
             lines.extend((index, 'body', (bubble_width, line), own) for line in body)
             lines.append((index, 'bottom', (bubble_width, msg.get('time', '') + (' ✓' if own else '')), own))
             lines.append((index, 'space', '', own))
@@ -369,6 +443,7 @@ class Pane:
             elif last >= self.offset + capacity:
                 self.offset = max(first, last - capacity + 1) if last - first < capacity else first
         self.offset = min(self.offset, max(0, len(lines) - capacity))
+        self.visible_media = []
         for row, (i, kind, value, own) in enumerate(lines[self.offset:self.offset + capacity], 5):
             attr = self.style('own') if own else self.style('bubble')
             if kind == 'date':
@@ -378,6 +453,15 @@ class Pane:
                 continue
             bw, text = value
             start = x + max(1, size - bw - 4) if own else x + 1
+            if kind in ('image', 'media'):
+                msg = self.items()[i]
+                if msg not in self.visible_media:
+                    self.visible_media.append(msg)
+                if kind == 'image':
+                    self.paint(row, start, '│' + ' ' * bw + '│', bw + 2, attr)
+                    self.draw_pixels(row, start + 2, (text,))
+                    self.target(start, row, bw + 2, 1, 'open_media', i)
+                    continue
             if kind == 'top':
                 header = ' ' + fit(text, bw - 2)
                 text = '╭' + header + '─' * max(0, bw - width(header)) + '╮'
@@ -388,7 +472,7 @@ class Pane:
                 content = ' ' + fit(text, bw - 2)
                 text = '│' + content + ' ' * max(0, bw - width(content)) + '│'
             self.paint(row, start, text, bw + 2, attr)
-            self.target(start, row, bw + 2, 1, 'message', i)
+            self.target(start, row, bw + 2, 1, 'open_media' if kind == 'media' else 'message', i)
         self.history_rect = (x, 5, size, capacity)
         if not lines:
             self.paint(6, x + 2, 'Загрузка…' if self.pending else 'Пока нет сообщений', size - 3, muted)
@@ -451,7 +535,21 @@ class Pane:
             self.button(4, max(1, sidebar - 5), '✕', 'clear_search')
         if 'вход' in self.status.lower():
             self.button(h - 2, 1, 'Войти в Telegram', 'login')
+        if self.media_view:
+            self.draw_media_view(w, h)
         self.screen.refresh()
+
+    def draw_media_view(self, w, h):
+        for row in range(h):
+            self.paint(row, 0, '', w - 1, self.style('bubble'), fill=True)
+        self.targets = []
+        self.paint(0, 2, 'Фото · Esc или × закрыть', max(1, w - 8), self.style())
+        self.button(0, w - 4, '×', 'close_media')
+        pixels = self.pixels(self.media_view, max(1, w - 4), max(1, h - 3))
+        if pixels:
+            self.draw_pixels(2, max(1, (w - len(pixels[0])) // 2), pixels)
+        else:
+            self.paint(2, 2, 'Изображение недоступно' if str(self.media_view) in self.media_failed else 'Загрузка изображения…', max(1, w - 4))
 
     @staticmethod
     def inside(rect, x, y):
@@ -479,7 +577,15 @@ class Pane:
                 return
 
     def action(self, action, value=None, double=False):
-        if action == 'theme':
+        if action == 'close_media':
+            self.media_view = None
+        elif self.media_view:
+            return
+        elif action == 'open_media' and isinstance(value, int) and value < len(self.items()):
+            self.index = value
+            self.media_view = self.media_path(self.items()[value])
+            self.load_visible_media()
+        elif action == 'theme':
             self.cycle_theme()
         elif action in ('tab', 'all'):
             self.switch_tab(value if action == 'tab' else 'all')
@@ -551,6 +657,11 @@ class Pane:
             self.mode = ''
 
     def handle(self, key):
+        if self.media_view and key in ('\x1b', 'q', curses.KEY_BACKSPACE):
+            self.media_view = None
+            return True
+        if self.media_view and key != curses.KEY_MOUSE:
+            return True
         if key == curses.KEY_MOUSE:
             try:
                 _, x, y, _, buttons = curses.getmouse()
@@ -630,6 +741,7 @@ class Pane:
                 if not self.pending and not self.mode and time.monotonic() - self.last_refresh >= 60:
                     self.refresh()
                 self.draw()
+                self.load_visible_media()
                 try:
                     key = self.screen.get_wch()
                 except curses.error:

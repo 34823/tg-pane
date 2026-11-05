@@ -3,6 +3,7 @@ from concurrent.futures import Future
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -39,6 +40,34 @@ class TerminalTests(unittest.TestCase):
         self.addCleanup(pane.pool.shutdown)
         pane.switch_tab('categories')
         return pane
+
+    @unittest.skipIf(tg.Image is None, 'Pillow is not installed')
+    def test_image_preview_and_open_without_reading_chat(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(tg, 'DATA', Path(directory)):
+            p = self.pane(72, 30)
+            p.switch_tab('all'); p.enter()
+            p.history = {'messages': [{'mid': 5, 'text': '[media] caption', 'media': 'photo'}]}
+            image = Path(directory) / 'media' / '42_5.png'
+            image.parent.mkdir()
+            tg.Image.new('RGB', (40, 40), (255, 0, 0)).save(image)
+            self.assertTrue(p.pixels(image, 20, 8))
+            lines = p.message_lines(40)
+            self.assertTrue(any(line[1] == 'body' and line[2][1] == 'caption' for line in lines))
+            p.draw()
+            target = next(t for t in p.targets if t[4] == 'open_media')
+            p.mouse(target[0], target[1], tg.curses.BUTTON1_RELEASED)
+            self.assertEqual(p.media_view, image)
+            p.handle('\x1b')
+            self.assertIsNone(p.media_view)
+
+    def test_only_visible_media_is_downloaded(self):
+        p = self.pane(); p.switch_tab('all'); p.enter()
+        p.demo = False
+        p.visible_media = [{'mid': 9, 'media': 'photo'}]
+        with tempfile.TemporaryDirectory() as directory, patch.object(tg, 'DATA', Path(directory)), patch.object(p, 'submit') as submit, patch.object(tg, 'Image', object()):
+            p.load_visible_media()
+            self.assertEqual(submit.call_args.args[:2], ('tgmedia.py', ['42', 9]))
+            self.assertNotIn('--read', str(submit.call_args))
 
     def test_folders_unique_and_navigation_is_read_only(self):
         p = self.pane()
